@@ -75,6 +75,300 @@
         }
       }
     },
+    "/api/insights/groups": {
+      "get": {
+        "summary": "List Insight Groups Route",
+        "operationId": "list_insight_groups_route_api_insights_groups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Insight Group Route",
+        "operationId": "create_insight_group_route_api_insights_groups_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/groups/{group_id}": {
+      "get": {
+        "summary": "Get Insight Group Route",
+        "operationId": "get_insight_group_route_api_insights_groups__group_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update Insight Group Route",
+        "operationId": "update_insight_group_route_api_insights_groups__group_id__patch",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Insight Group Route",
+        "operationId": "delete_insight_group_route_api_insights_groups__group_id__delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/groups/{group_id}/members": {
+      "post": {
+        "summary": "Add Insight Group Members Route",
+        "operationId": "add_insight_group_members_route_api_insights_groups__group_id__members_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/groups/{group_id}/members/{meeting_id}": {
+      "delete": {
+        "summary": "Remove Insight Group Member Route",
+        "operationId": "remove_insight_group_member_route_api_insights_groups__group_id__members__meeting_id__delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/groups/{group_id}/trends": {
+      "get": {
+        "summary": "Get Insight Group Trends Route",
+        "operationId": "get_insight_group_trends_route_api_insights_groups__group_id__trends_get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/groups/{group_id}/snapshot": {
+      "post": {
+        "summary": "Snapshot Insight Group Route",
+        "operationId": "snapshot_insight_group_route_api_insights_groups__group_id__snapshot_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/insights/overview": {
       "get": {
         "summary": "Get Insights Overview Route",
@@ -6866,6 +7160,304 @@
         "title": "InsightsMe",
         "type": "object"
       },
+      "InsightGroupAggregate": {
+        "properties": {
+          "axes": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Axes",
+            "type": "object"
+          },
+          "moments": {
+            "$ref": "#/components/schemas/InsightsMomentCounts"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/InsightGroupCoverage"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/InsightGroupMemberPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "coverage",
+          "moments"
+        ],
+        "title": "InsightGroupAggregate",
+        "type": "object"
+      },
+      "InsightGroupCoverage": {
+        "properties": {
+          "analyzedMembers": {
+            "title": "Analyzedmembers",
+            "type": "integer"
+          },
+          "totalMembers": {
+            "title": "Totalmembers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "analyzedMembers",
+          "totalMembers"
+        ],
+        "title": "InsightGroupCoverage",
+        "type": "object"
+      },
+      "InsightGroupMember": {
+        "properties": {
+          "meetingId": {
+            "title": "Meetingid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "startMs": {
+            "title": "Startms",
+            "type": "integer"
+          },
+          "addedAt": {
+            "title": "Addedat",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "addedAt",
+          "meetingId",
+          "startMs",
+          "title"
+        ],
+        "title": "InsightGroupMember",
+        "type": "object"
+      },
+      "InsightGroupMemberPoint": {
+        "description": "One member meeting on the group's timeline (drill-down via meetingId + startMs).",
+        "properties": {
+          "meetingId": {
+            "title": "Meetingid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "startMs": {
+            "title": "Startms",
+            "type": "integer"
+          },
+          "axisScores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Axisscores",
+            "type": "object"
+          },
+          "moments": {
+            "$ref": "#/components/schemas/InsightsMomentCounts"
+          }
+        },
+        "required": [
+          "meetingId",
+          "moments",
+          "startMs",
+          "title"
+        ],
+        "title": "InsightGroupMemberPoint",
+        "type": "object"
+      },
+      "InsightGroup": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "axes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Axes"
+          },
+          "memberCount": {
+            "default": 0,
+            "title": "Membercount",
+            "type": "integer"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "integer"
+          },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InsightGroupMember"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Members"
+          },
+          "aggregate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsightGroupAggregate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "name",
+          "updatedAt"
+        ],
+        "title": "InsightGroup",
+        "type": "object"
+      },
+      "InsightGroupList": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/InsightGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "title": "InsightGroupList",
+        "type": "object"
+      },
+      "InsightGroupSnapshot": {
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "integer"
+          },
+          "memberCount": {
+            "title": "Membercount",
+            "type": "integer"
+          },
+          "axes": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Axes",
+            "type": "object"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "createdAt",
+          "memberCount"
+        ],
+        "title": "InsightGroupSnapshot",
+        "type": "object"
+      },
+      "InsightGroupChange": {
+        "description": "Result of a membership change: the new aggregate and the snapshot taken (None if nothing changed).",
+        "properties": {
+          "aggregate": {
+            "$ref": "#/components/schemas/InsightGroupAggregate"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsightGroupSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "aggregate"
+        ],
+        "title": "InsightGroupChange",
+        "type": "object"
+      },
+      "InsightGroupTrends": {
+        "properties": {
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/InsightGroupSnapshot"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "memberSeries": {
+            "items": {
+              "$ref": "#/components/schemas/InsightGroupMemberPoint"
+            },
+            "title": "Memberseries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "memberSeries",
+          "snapshots"
+        ],
+        "title": "InsightGroupTrends",
+        "type": "object"
+      },
       "TranscriptImportSpeaker": {
         "properties": {
           "label": {
@@ -6991,4 +7583,3 @@
     }
   }
 }
-

@@ -282,6 +282,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     title_service = opts.get("titleService") or opts.get("title_service")
     insights_service = opts.get("insightsService") or opts.get("insights_service")
     insights_query_service = opts.get("insightsQueryService") or opts.get("insights_query_service")
+    insight_group_service = opts.get("insightGroupService") or opts.get("insight_group_service")
     insights_llm_service = opts.get("insightsLlmService") or opts.get("insights_llm_service")
     transcript_import_service = opts.get("transcriptImportService") or opts.get(
         "transcript_import_service"
@@ -404,6 +405,14 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
 
             insights_query_service = InsightsQueryService(db=db, config_dir=config_dir)
         return insights_query_service
+
+    def get_insight_group_service() -> Any:
+        nonlocal insight_group_service
+        if insight_group_service is None:
+            from .services.insight_groups import InsightGroupService
+
+            insight_group_service = InsightGroupService(db=db, config_dir=config_dir)
+        return insight_group_service
 
     def get_insights_llm_service() -> Any:
         nonlocal insights_llm_service
@@ -810,6 +819,112 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         if get_insights_service().is_enabled():
             return None
         return JSONResponse({"error": "insights disabled"}, status_code=404)
+
+    # -- Insight Groups -------------------------------------------------------------
+
+    async def _json_body(request: Request) -> dict[str, Any] | None:
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
+    def _group_not_found() -> JSONResponse:
+        return JSONResponse({"error": "group not found"}, status_code=404)
+
+    def _valid_axes(value: Any) -> bool:
+        return value is None or (isinstance(value, list) and all(isinstance(a, str) for a in value))
+
+    @app.get("/api/insights/groups")
+    async def list_insight_groups_route() -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        groups = await asyncio.to_thread(get_insight_group_service().list_groups)
+        return JSONResponse({"groups": groups})
+
+    @app.post("/api/insights/groups")
+    async def create_insight_group_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        if body is None or not isinstance(body.get("name"), str) or not body["name"].strip():
+            return JSONResponse({"error": "name is required"}, status_code=400)
+        desc = body.get("description")
+        if desc is not None and not isinstance(desc, str):
+            return JSONResponse({"error": "description must be a string"}, status_code=400)
+        if not _valid_axes(body.get("axes")):
+            return JSONResponse({"error": "axes must be a list of strings"}, status_code=400)
+        group = await asyncio.to_thread(
+            get_insight_group_service().create_group, body["name"], desc, body.get("axes")
+        )
+        return JSONResponse(group, status_code=201)
+
+    @app.get("/api/insights/groups/{group_id}")
+    async def get_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        group = await asyncio.to_thread(get_insight_group_service().get_group, group_id)
+        return JSONResponse(group) if group is not None else _group_not_found()
+
+    @app.patch("/api/insights/groups/{group_id}")
+    async def update_insight_group_route(group_id: str, request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        name = body.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            return JSONResponse({"error": "name must be a non-empty string"}, status_code=400)
+        if "description" in body and body["description"] is not None and not isinstance(body["description"], str):
+            return JSONResponse({"error": "description must be a string"}, status_code=400)
+        if "axes" in body and not _valid_axes(body["axes"]):
+            return JSONResponse({"error": "axes must be a list of strings"}, status_code=400)
+        kwargs: dict[str, Any] = {k: body[k] for k in ("description", "axes") if k in body}
+        group = await asyncio.to_thread(get_insight_group_service().update_group, group_id, name, **kwargs)
+        return JSONResponse(group) if group is not None else _group_not_found()
+
+    @app.delete("/api/insights/groups/{group_id}")
+    async def delete_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        if not await asyncio.to_thread(get_insight_group_service().delete_group, group_id):
+            return _group_not_found()
+        return JSONResponse({"deleted": True})
+
+    @app.post("/api/insights/groups/{group_id}/members")
+    async def add_insight_group_members_route(group_id: str, request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        ids = body.get("meetingIds") if body else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            if await asyncio.to_thread(get_insight_group_service().get_group, group_id) is None:
+                return _group_not_found()
+            return JSONResponse({"error": "meetingIds must be a list of strings"}, status_code=400)
+        res = await asyncio.to_thread(get_insight_group_service().add_members, group_id, ids)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.delete("/api/insights/groups/{group_id}/members/{meeting_id}")
+    async def remove_insight_group_member_route(group_id: str, meeting_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().remove_member, group_id, meeting_id)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.get("/api/insights/groups/{group_id}/trends")
+    async def get_insight_group_trends_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().get_trends, group_id)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.post("/api/insights/groups/{group_id}/snapshot")
+    async def snapshot_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().snapshot_group, group_id, "manual")
+        return JSONResponse(res) if res is not None else _group_not_found()
 
     @app.get("/api/insights/overview")
     async def get_insights_overview_route(request: Request) -> JSONResponse:
@@ -3122,6 +3237,14 @@ def export_openapi_schema() -> dict[str, Any]:
         s.InsightsBackfillResult,
         s.InsightsStatus,
         s.InsightsMe,
+        s.InsightGroup,
+        s.InsightGroupList,
+        s.InsightGroupMember,
+        s.InsightGroupMemberPoint,
+        s.InsightGroupAggregate,
+        s.InsightGroupSnapshot,
+        s.InsightGroupChange,
+        s.InsightGroupTrends,
         s.TranscriptImportResult,
     ]
     for model_cls in domain_models:

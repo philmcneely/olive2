@@ -600,3 +600,79 @@ def test_openapi_export_includes_insights_models() -> None:
         assert name in schemas, name
     assert "from" in schemas["InsightsOverview"]["properties"]
     assert {"topGoodMoments", "topBadMoments"} <= set(schemas["InsightsOverview"]["properties"])
+
+
+# -- insight groups -------------------------------------------------------------
+
+
+def _group(env: Env, **body: Any) -> dict[str, Any]:
+    res = env.client.post("/api/insights/groups", json={"name": "Weekly", **body})
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+def test_groups_crud_and_shapes(env: Env) -> None:
+    g = _group(env, description="d", axes=["warmth"])
+    s.InsightGroup.model_validate(g)
+    lst = env.client.get("/api/insights/groups")
+    assert lst.status_code == 200
+    body = s.InsightGroupList.model_validate(lst.json())
+    assert body.groups[0].memberCount == 0
+    got = env.client.get(f"/api/insights/groups/{g['id']}")
+    assert got.status_code == 200
+    assert s.InsightGroup.model_validate(got.json()).aggregate is not None
+    up = env.client.patch(f"/api/insights/groups/{g['id']}", json={"name": "New"})
+    assert up.status_code == 200 and up.json()["name"] == "New"
+    assert env.client.delete(f"/api/insights/groups/{g['id']}").status_code == 200
+    assert env.client.get(f"/api/insights/groups/{g['id']}").status_code == 404
+
+
+def test_groups_members_trends_snapshot(env: Env) -> None:
+    g = _group(env)
+    gid = g["id"]
+    res = env.client.post(f"/api/insights/groups/{gid}/members", json={"meetingIds": ["m0", "m1"]})
+    assert res.status_code == 200
+    agg = s.InsightGroupAggregate.model_validate(res.json()["aggregate"])
+    assert agg.coverage.totalMembers == 2
+    assert agg.series[0].meetingId == "m0" and agg.series[0].startMs > 0
+    s.InsightGroupSnapshot.model_validate(res.json()["snapshot"])
+    tr = env.client.get(f"/api/insights/groups/{gid}/trends")
+    assert tr.status_code == 200
+    trends = s.InsightGroupTrends.model_validate(tr.json())
+    assert len(trends.snapshots) == 1 and len(trends.memberSeries) == 2
+    snap = env.client.post(f"/api/insights/groups/{gid}/snapshot")
+    assert snap.status_code == 200 and snap.json()["reason"] == "manual"
+    rm = env.client.delete(f"/api/insights/groups/{gid}/members/m1")
+    assert rm.status_code == 200 and rm.json()["snapshot"]["reason"] == "remove"
+    assert len(env.client.get(f"/api/insights/groups/{gid}/trends").json()["snapshots"]) == 3
+
+
+def test_groups_errors(env: Env) -> None:
+    assert env.client.post("/api/insights/groups", json={"name": " "}).status_code == 400
+    assert env.client.post("/api/insights/groups", json={"name": "x", "axes": "bad"}).status_code == 400
+    gid = _group(env)["id"]
+    assert env.client.post(f"/api/insights/groups/{gid}/members", json={"meetingIds": "m0"}).status_code == 400
+    for method, path in (
+        ("get", "/api/insights/groups/nope"),
+        ("patch", "/api/insights/groups/nope"),
+        ("delete", "/api/insights/groups/nope"),
+        ("post", "/api/insights/groups/nope/members"),
+        ("delete", "/api/insights/groups/nope/members/m0"),
+        ("get", "/api/insights/groups/nope/trends"),
+        ("post", "/api/insights/groups/nope/snapshot"),
+    ):
+        kw = {"json": {"meetingIds": [], "name": "x"}} if method in ("post", "patch") else {}
+        assert getattr(env.client, method)(path, **kw).status_code == 404, (method, path)
+
+
+def test_groups_gated_when_disabled(tmp_path: Path, disabled: None) -> None:
+    e = Env(tmp_path)
+    assert e.client.get("/api/insights/groups").status_code == 404
+    assert e.client.post("/api/insights/groups", json={"name": "x"}).status_code == 404
+    assert e.client.get("/api/insights/groups/x/trends").status_code == 404
+
+
+def test_openapi_export_includes_insight_group_models() -> None:
+    schemas = export_openapi_schema()["components"]["schemas"]
+    for name in ("InsightGroup", "InsightGroupList", "InsightGroupAggregate", "InsightGroupTrends", "InsightGroupSnapshot", "InsightGroupMember", "InsightGroupMemberPoint"):
+        assert name in schemas, name

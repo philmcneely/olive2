@@ -1000,3 +1000,72 @@ class TranscriptImportResult(CamelModel):
     unmappedNames: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     timingSynthetic: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Insight Groups (/api/insights/groups/*)
+# ---------------------------------------------------------------------------
+
+
+class InsightGroupMember(CamelModel):
+    meetingId: str
+    title: str
+    startMs: int
+    addedAt: int
+
+
+class InsightGroupMemberPoint(CamelModel):
+    """One member meeting on the group's timeline (drill-down via meetingId + startMs)."""
+
+    meetingId: str
+    title: str
+    startMs: int
+    axisScores: dict[str, float] = Field(default_factory=dict)
+    moments: InsightsMomentCounts
+
+
+class InsightGroupCoverage(CamelModel):
+    analyzedMembers: int
+    totalMembers: int
+
+
+class InsightGroupAggregate(CamelModel):
+    axes: dict[str, float] = Field(default_factory=dict)
+    moments: InsightsMomentCounts
+    coverage: InsightGroupCoverage
+    series: list[InsightGroupMemberPoint] = Field(default_factory=list)
+
+
+class InsightGroupSnapshot(CamelModel):
+    createdAt: int
+    memberCount: int
+    axes: dict[str, float] = Field(default_factory=dict)
+    reason: str | None = None
+
+
+class InsightGroup(CamelModel):
+    id: str
+    name: str
+    description: str | None = None
+    axes: list[str] | None = None
+    memberCount: int = 0
+    createdAt: int
+    updatedAt: int
+    members: list[InsightGroupMember] | None = None
+    aggregate: InsightGroupAggregate | None = None
+
+
+class InsightGroupList(CamelModel):
+    groups: list[InsightGroup]
+
+
+class InsightGroupChange(CamelModel):
+    """Result of a membership change: the new aggregate and the snapshot taken (None if nothing changed)."""
+
+    aggregate: InsightGroupAggregate
+    snapshot: InsightGroupSnapshot | None = None
+
+
+class InsightGroupTrends(CamelModel):
+    snapshots: list[InsightGroupSnapshot]
+    memberSeries: list[InsightGroupMemberPoint]
