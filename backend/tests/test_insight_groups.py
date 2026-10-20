@@ -201,3 +201,51 @@ def test_manual_snapshot(seeded: DbHandle, svc: InsightGroupService) -> None:
     snap = svc.snapshot_group(g["id"], "manual")
     assert snap is not None and snap["reason"] == "manual" and snap["memberCount"] == 1
     assert len(svc.get_trends(g["id"])["snapshots"]) == 2  # type: ignore[index]
+
+
+# -- compare ----------------------------------------------------------------------
+
+
+def test_compare_aligns_axes_and_includes_default(seeded: DbHandle, svc: InsightGroupService) -> None:
+    a = svc.create_group("A")
+    b = svc.create_group("B", axes=["warmth"])
+    svc.add_members(a["id"], ["m1", "m2"])
+    svc.add_members(b["id"], ["m_late", "m_bare"])
+    out = svc.compare([a["id"], b["id"]])
+    assert out["axes"] == ["hostility", "warmth"]
+    by = {g["id"]: g for g in out["groups"]}
+    assert [g["id"] for g in out["groups"]] == [a["id"], b["id"]]
+    assert by[a["id"]]["name"] == "A" and by[a["id"]]["memberCount"] == 2
+    assert by[a["id"]]["scores"]["warmth"] == pytest.approx(0.45)
+    assert by[a["id"]]["scores"]["hostility"] == pytest.approx(0.2)
+    assert by[b["id"]]["scores"] == {"warmth": pytest.approx(0.9)}  # missing axis stays absent
+    assert by[b["id"]]["coverage"] == {"analyzedMembers": 1, "totalMembers": 2}
+    assert by[a["id"]]["meetingIds"] == ["m1", "m2"]
+    assert by[b["id"]]["meetingIds"] == ["m_late"]
+    # default = whole corpus: mean of meeting means over analyzed meetings
+    default = out["default"]
+    assert default["scores"]["warmth"] == pytest.approx((0.3 + 0.6 + 0.9) / 3)
+    assert default["scores"]["hostility"] == pytest.approx((0.2 + 0.1) / 2)
+    assert default["coverage"] == {"analyzedMeetings": 3, "totalMeetings": 4}
+    assert default["meetingIds"] == ["m1", "m2", "m_late"]
+
+
+def test_compare_without_default(seeded: DbHandle, svc: InsightGroupService) -> None:
+    a = svc.create_group("A")
+    svc.add_members(a["id"], ["m1"])
+    out = svc.compare([a["id"]], include_default=False)
+    assert out["default"] is None
+    assert out["axes"] == ["hostility", "warmth"]
+
+
+def test_compare_empty_unknown_and_duplicate_groups(seeded: DbHandle, svc: InsightGroupService) -> None:
+    empty = svc.create_group("Empty")
+    a = svc.create_group("A")
+    svc.add_members(a["id"], ["m1"])
+    out = svc.compare([empty["id"], "ghost", a["id"], a["id"]])
+    assert [g["id"] for g in out["groups"]] == [empty["id"], a["id"]]  # unknown skipped, duplicate collapsed
+    assert out["groups"][0]["scores"] == {} and out["groups"][0]["coverage"] == {"analyzedMembers": 0, "totalMembers": 0}
+    none = svc.compare([])
+    assert none["groups"] == [] and none["default"] is not None
+    assert none["axes"] == ["hostility", "warmth"]
+    assert svc.compare([], include_default=False) == {"axes": [], "groups": [], "default": None}

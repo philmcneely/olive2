@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { AlertTriangle, Quote, RefreshCw, Search, Sparkles } from "lucide-react";
 import { Badge, Button, Card, CardBody, Input, notify } from "./ui";
+import { insightGroupsApi, type InsightGroup } from "../api/insightGroups";
 import {
   InsightsApiError,
   insightsApi,
@@ -750,6 +751,22 @@ function MePicker({ me, speakers, onChange }: { me: InsightsMe | null; speakers:
   );
 }
 
+function ScopePicker({ groups, value, onChange }: { groups: InsightGroup[]; value: string; onChange: (id: string) => void }): ReactElement | null {
+  if (groups.length === 0 && !value) return null;
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="font-medium text-base-content">Scope</span>
+      <select className="select select-sm w-full sm:w-64" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Scope insights to a group">
+        <option value="">All meetings</option>
+        {groups.map((g) => (
+          <option key={g.id} value={g.id}>{g.name} ({g.memberCount})</option>
+        ))}
+      </select>
+      {value && <span className="text-xs text-base-content/70">Showing only this group's meetings.</span>}
+    </label>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
@@ -766,6 +783,9 @@ export function InsightsView({ onNavigate, speakers }: InsightsViewProps): React
   const [dimension, setDimension] = useState("");
   const [personId, setPersonId] = useState<string | null>(null);
   const [backfilling, setBackfilling] = useState(false);
+  const [groups, setGroups] = useState<InsightGroup[]>([]);
+  // "" = all meetings (the default whole-corpus view); otherwise an Insight Group id.
+  const [groupId, setGroupId] = useState("");
 
   const open: Open = useCallback((meetingId, startMs, quote) => onNavigate(meetingHref(meetingId, startMs, quote)), [onNavigate]);
 
@@ -786,8 +806,8 @@ export function InsightsView({ onNavigate, speakers }: InsightsViewProps): React
       try {
         const [s, o, d, m] = await Promise.all([
           insightsApi.status(),
-          insightsApi.overview({ bucket }),
-          insightsApi.dyads(bucket),
+          insightsApi.overview({ bucket, group: groupId || null }),
+          insightsApi.dyads(bucket, groupId || null),
           insightsApi.getMe(),
         ]);
         if (isCancelled()) return;
@@ -800,13 +820,28 @@ export function InsightsView({ onNavigate, speakers }: InsightsViewProps): React
       } catch (exc) {
         if (isCancelled()) return;
         if (exc instanceof InsightsApiError && exc.disabled) setDisabled(true);
-        else setError(errorMessage(exc, "Failed to load insights"));
+        else if (groupId && exc instanceof InsightsApiError && exc.status === 404) {
+          // The scoped group was deleted elsewhere; fall back to the whole corpus.
+          setGroupId("");
+          void insightGroupsApi.list().then((g) => !isCancelled() && setGroups(g)).catch(() => undefined);
+        } else setError(errorMessage(exc, "Failed to load insights"));
       } finally {
         if (!isCancelled()) setLoading(false);
       }
     },
-    [bucket]
+    [bucket, groupId]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    insightGroupsApi
+      .list()
+      .then((g) => !cancelled && setGroups(g))
+      .catch(() => undefined); // the scope picker is optional; the main load surfaces real errors
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -857,6 +892,7 @@ export function InsightsView({ onNavigate, speakers }: InsightsViewProps): React
       ) : (
         <>
           <StatusBar status={status} onBackfill={() => void handleBackfill()} backfilling={backfilling} />
+          <ScopePicker groups={groups} value={groupId} onChange={setGroupId} />
           <MePicker me={me} speakers={speakers} onChange={(next) => { setMe(next); void loadAll(); }} />
           {error && <div className="rounded-xl border border-error bg-error/10 p-3 text-sm text-error">{error}</div>}
           <FindCall onOpen={open} />

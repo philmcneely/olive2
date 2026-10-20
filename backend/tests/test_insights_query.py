@@ -479,3 +479,81 @@ def test_meeting_shows_unverified_moments_flagged(env: Any) -> None:
     out = svc.meeting("a")
     assert out is not None
     assert sorted(m["verified"] for m in out["moments"]) == [False, True]
+
+
+# -- group scoping --------------------------------------------------------------
+
+
+def _group(db: Any, gid: str, meeting_ids: tuple[str, ...]) -> None:
+    with db.engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO insight_groups (id, name, created_at, updated_at) VALUES (:g, :g, 0, 0)"), {"g": gid}
+        )
+        for mid in meeting_ids:
+            conn.execute(
+                text("INSERT INTO insight_group_members (id, group_id, meeting_id, added_at) VALUES (:i, :g, :m, 0)"),
+                {"i": f"{gid}-{mid}", "g": gid, "m": mid},
+            )
+
+
+def test_overview_group_restricts_to_member_meetings(env: Any) -> None:
+    db, seed, svc = env
+    seed.meeting("in1", _ms(2026, 1, 10))
+    seed.meeting("in2", _ms(2026, 2, 10))
+    seed.meeting("out", _ms(2026, 3, 10))
+    for mid in ("in1", "in2", "out"):
+        seed.signal(mid, ALICE, {"warmth": 0.5})
+        seed.moment(mid, 1000, ALICE, ME, "good")
+    _group(db, "g1", ("in1", "in2"))
+
+    out = svc.overview(group_id="g1")
+    assert {m for p in out["series"]["warmth"] for m in p["meetingIds"]} == {"in1", "in2"}
+    assert out["coverage"] == {"analyzedMeetings": 2, "totalMeetings": 2}
+    assert out["moments"] == {"good": 2, "bad": 0}
+    everything = svc.overview()
+    assert {m for p in everything["series"]["warmth"] for m in p["meetingIds"]} == {"in1", "in2", "out"}
+    assert everything["coverage"]["totalMeetings"] == 3
+
+
+def test_overview_group_combines_with_other_filters(env: Any) -> None:
+    db, seed, svc = env
+    seed.meeting("a", _ms(2026, 1, 10), tags=("x",))
+    seed.meeting("b", _ms(2026, 2, 10))
+    for mid in ("a", "b"):
+        seed.signal(mid, ALICE, {"warmth": 0.5})
+    _group(db, "g1", ("a", "b"))
+    out = svc.overview(group_id="g1", tag="x")
+    assert {m for p in out["series"]["warmth"] for m in p["meetingIds"]} == {"a"}
+
+
+def test_overview_unknown_or_empty_group_is_empty(env: Any) -> None:
+    db, seed, svc = env
+    seed.meeting("a", _ms(2026, 1, 10))
+    seed.signal("a", ALICE, {"warmth": 0.5})
+    _group(db, "empty", ())
+    for gid in ("empty", "ghost"):
+        out = svc.overview(group_id=gid)
+        assert out["series"] == {}
+        assert out["coverage"] == {"analyzedMeetings": 0, "totalMeetings": 0}
+        assert out["moments"] == {"good": 0, "bad": 0}
+
+
+def test_group_id_is_bound_not_interpolated(env: Any) -> None:
+    _, seed, svc = env
+    seed.meeting("a", _ms(2026, 1, 10))
+    seed.signal("a", ALICE, {"warmth": 0.5})
+    out = svc.overview(group_id="x' OR '1'='1")
+    assert out["series"] == {}
+
+
+def test_dyads_group_restricts_to_member_meetings(env: Any) -> None:
+    db, seed, svc = env
+    svc.set_me(ME, [])
+    _seed_dyads(seed)
+    _group(db, "g1", ("d0", "d1", "d2"))
+    out = svc.dyads(group_id="g1")
+    assert out["dyads"]
+    for d in out["dyads"]:
+        assert set(d["meetingIds"]) <= {"d0", "d1", "d2"}
+    assert {m for d in svc.dyads()["dyads"] for m in d["meetingIds"]} >= {"d3", "d4", "d5"}
+    assert svc.dyads(group_id="ghost")["dyads"] == []

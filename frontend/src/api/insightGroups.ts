@@ -66,6 +66,30 @@ export interface InsightGroupChange {
   snapshot?: InsightGroupSnapshot | null;
 }
 
+/** One compared group: per-axis scores (an axis the group has no data for is absent) and the meetings behind them. */
+export interface InsightGroupCompareGroup {
+  id: string;
+  name: string;
+  memberCount: number;
+  scores: Record<string, number>;
+  coverage: InsightGroupCoverage;
+  meetingIds: string[];
+}
+
+/** Whole-corpus baseline the groups are compared against. */
+export interface InsightGroupCompareDefault {
+  scores: Record<string, number>;
+  coverage: { analyzedMeetings: number; totalMeetings: number };
+  meetingIds: string[];
+}
+
+export interface InsightGroupCompare {
+  /** Union of the axes across the compared groups and the default. */
+  axes: string[];
+  groups: InsightGroupCompareGroup[];
+  default?: InsightGroupCompareDefault | null;
+}
+
 export interface InsightGroupInput {
   name: string;
   description?: string | null;
@@ -98,5 +122,7 @@ export const insightGroupsApi = {
   removeMember: (id: string, meetingId: string) =>
     request<InsightGroupChange>(`${gid(id)}/members/${encodeURIComponent(meetingId)}`, { method: "DELETE" }),
   trends: (id: string) => request<InsightGroupTrends>(`${gid(id)}/trends`),
+  compare: (groupIds: string[], includeDefault = true) =>
+    request<InsightGroupCompare>(`${base}/compare`, json("POST", { groupIds, includeDefault })),
   snapshot: (id: string) => request<InsightGroupChange>(`${gid(id)}/snapshot`, json("POST")),
 };

@@ -105,6 +105,22 @@
         }
       }
     },
+    "/api/insights/groups/compare": {
+      "post": {
+        "summary": "Compare Insight Groups Route",
+        "operationId": "compare_insight_groups_route_api_insights_groups_compare_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/insights/groups/{group_id}": {
       "get": {
         "summary": "Get Insight Group Route",
@@ -7456,6 +7472,128 @@
           "snapshots"
         ],
         "title": "InsightGroupTrends",
+        "type": "object"
+      },
+      "InsightGroupCompareDefault": {
+        "description": "The whole-corpus baseline the groups are compared against.",
+        "properties": {
+          "scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Scores",
+            "type": "object"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/InsightGroupCompareDefaultCoverage"
+          },
+          "meetingIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Meetingids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "coverage"
+        ],
+        "title": "InsightGroupCompareDefault",
+        "type": "object"
+      },
+      "InsightGroupCompareDefaultCoverage": {
+        "properties": {
+          "analyzedMeetings": {
+            "title": "Analyzedmeetings",
+            "type": "integer"
+          },
+          "totalMeetings": {
+            "title": "Totalmeetings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "analyzedMeetings",
+          "totalMeetings"
+        ],
+        "title": "InsightGroupCompareDefaultCoverage",
+        "type": "object"
+      },
+      "InsightGroupCompareGroup": {
+        "description": "One compared group: its per-axis scores and the analyzed meetings behind them (drill-down).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "memberCount": {
+            "title": "Membercount",
+            "type": "integer"
+          },
+          "scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Scores",
+            "type": "object"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/InsightGroupCoverage"
+          },
+          "meetingIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Meetingids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "coverage",
+          "id",
+          "memberCount",
+          "name"
+        ],
+        "title": "InsightGroupCompareGroup",
+        "type": "object"
+      },
+      "InsightGroupCompare": {
+        "properties": {
+          "axes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/InsightGroupCompareGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsightGroupCompareDefault"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "axes",
+          "groups"
+        ],
+        "title": "InsightGroupCompare",
         "type": "object"
       },
       "TranscriptImportSpeaker": {

@@ -1069,3 +1069,33 @@ class InsightGroupChange(CamelModel):
 class InsightGroupTrends(CamelModel):
     snapshots: list[InsightGroupSnapshot]
     memberSeries: list[InsightGroupMemberPoint]
+
+
+class InsightGroupCompareGroup(CamelModel):
+    """One compared group: its per-axis scores and the analyzed meetings behind them (drill-down)."""
+
+    id: str
+    name: str
+    memberCount: int
+    scores: dict[str, float] = Field(default_factory=dict)
+    coverage: InsightGroupCoverage
+    meetingIds: list[str] = Field(default_factory=list)
+
+
+class InsightGroupCompareDefaultCoverage(CamelModel):
+    analyzedMeetings: int
+    totalMeetings: int
+
+
+class InsightGroupCompareDefault(CamelModel):
+    """The whole-corpus baseline the groups are compared against."""
+
+    scores: dict[str, float] = Field(default_factory=dict)
+    coverage: InsightGroupCompareDefaultCoverage
+    meetingIds: list[str] = Field(default_factory=list)
+
+
+class InsightGroupCompare(CamelModel):
+    axes: list[str]
+    groups: list[InsightGroupCompareGroup]
+    default: InsightGroupCompareDefault | None = None

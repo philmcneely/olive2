@@ -182,7 +182,7 @@ def _round(value: float) -> float:
 
 
 def _scope_sql(
-    frm: int | None, to: int | None, tag: str | None, *, alias: str = "m"
+    frm: int | None, to: int | None, tag: str | None, group_id: str | None = None, *, alias: str = "m"
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -195,6 +195,9 @@ def _scope_sql(
     if tag:
         clauses.append(f"EXISTS (SELECT 1 FROM json_each({alias}.tags) WHERE json_each.value = :tag)")
         params["tag"] = tag
+    if group_id:
+        clauses.append(f"{alias}.id IN (SELECT meeting_id FROM insight_group_members WHERE group_id = :group_id)")
+        params["group_id"] = group_id
     return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -278,9 +281,14 @@ class InsightsQueryService:
         return True
 
     def _load_samples(
-        self, frm: int | None, to: int | None, tag: str | None, speaker_id: str | None = None
+        self,
+        frm: int | None,
+        to: int | None,
+        tag: str | None,
+        speaker_id: str | None = None,
+        group_id: str | None = None,
     ) -> list[_Sample]:
-        scope, params = _scope_sql(frm, to, tag)
+        scope, params = _scope_sql(frm, to, tag, group_id)
         sql = (
             "SELECT s.meeting_id, m.start_time, m.title, s.speaker_id, s.identity_source, "
             "s.identity_confidence, s.dimensions "
@@ -295,10 +303,15 @@ class InsightsQueryService:
             return [_Sample(r) for r in conn.execute(text(sql), params).mappings().all()]
 
     def _load_moments(
-        self, frm: int | None, to: int | None, tag: str | None, include_unverified: bool = False
+        self,
+        frm: int | None,
+        to: int | None,
+        tag: str | None,
+        include_unverified: bool = False,
+        group_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Moments in scope. Ungrounded (``verified = 0``) moments are excluded unless asked for."""
-        scope, params = _scope_sql(frm, to, tag)
+        scope, params = _scope_sql(frm, to, tag, group_id)
         if not include_unverified:
             scope += " AND mo.verified = 1"
         sql = (
@@ -340,8 +353,10 @@ class InsightsQueryService:
             "verified": bool(m["verified"]),
         }
 
-    def _coverage(self, frm: int | None, to: int | None, tag: str | None) -> dict[str, int]:
-        scope, params = _scope_sql(frm, to, tag)
+    def _coverage(
+        self, frm: int | None, to: int | None, tag: str | None, group_id: str | None = None
+    ) -> dict[str, int]:
+        scope, params = _scope_sql(frm, to, tag, group_id)
         with self.db.connect() as conn:
             total = conn.execute(text("SELECT COUNT(*) FROM meetings m WHERE 1 = 1" + scope), params).scalar_one()
             analyzed = conn.execute(
@@ -441,11 +456,16 @@ class InsightsQueryService:
         tag: str | None = None,
         bucket: str = "month",
         include_unverified: bool = False,
+        group_id: str | None = None,
     ) -> dict[str, Any]:
-        """Corpus-level series by dimension, top outliers, good/bad counts, and coverage."""
+        """Corpus-level series by dimension, top outliers, good/bad counts, and coverage.
+
+        ``group_id`` restricts everything to that Insight Group's member meetings (an unknown or empty
+        group simply has no meetings in scope).
+        """
         bucket_key(0, bucket)  # validate early
         frm_ms, to_ms = _to_ms(frm), _to_ms(to)
-        samples = self._load_samples(frm_ms, to_ms, tag, speaker_id)
+        samples = self._load_samples(frm_ms, to_ms, tag, speaker_id, group_id)
         attributed = [s for s in samples if self._is_attributed(s)]
         # A named person is a per-person claim, so only trusted rows count; the whole-corpus view keeps
         # every row (an unidentified voice still shaped the call's tone) but reports how many were unattributed.
@@ -462,7 +482,7 @@ class InsightsQueryService:
             outliers.extend(found)
         outliers.sort(key=lambda o: (-abs(o["z"]), o["startMs"]))
 
-        moments = self._load_moments(frm_ms, to_ms, tag, include_unverified)
+        moments = self._load_moments(frm_ms, to_ms, tag, include_unverified, group_id)
         if speaker_id is not None:
             moments = [m for m in moments if m["speaker_id"] == speaker_id and self._moment_attributed(m)]
 
@@ -477,7 +497,7 @@ class InsightsQueryService:
             "moments": self._moment_counts(moments),
             "topGoodMoments": self._top_moments(moments, "good"),
             "topBadMoments": self._top_moments(moments, "bad"),
-            "coverage": self._coverage(frm_ms, to_ms, tag),
+            "coverage": self._coverage(frm_ms, to_ms, tag, group_id),
             "unattributed": {"rows": len(unattributed), "meetingIds": sorted({s.meeting_id for s in unattributed})},
         }
 
@@ -645,6 +665,7 @@ class InsightsQueryService:
         to: int | str | None = None,
         bucket: str = "month",
         include_unverified: bool = False,
+        group_id: str | None = None,
     ) -> dict[str, Any]:
         """Per ordered pair (me->X and X->me): bucketed tone series, trend, and supporting meetings.
 
@@ -654,7 +675,7 @@ class InsightsQueryService:
         bucket_key(0, bucket)
         me_id = me_id or self.get_me()["speakerId"]
         frm_ms, to_ms = _to_ms(frm), _to_ms(to)
-        samples = self._load_samples(frm_ms, to_ms, None)
+        samples = self._load_samples(frm_ms, to_ms, None, None, group_id)
         unattributed = [s for s in samples if not self._is_attributed(s)]
         result: dict[str, Any] = {
             "meId": me_id,
@@ -678,7 +699,7 @@ class InsightsQueryService:
 
         moments = [
             m
-            for m in self._load_moments(frm_ms, to_ms, None, include_unverified)
+            for m in self._load_moments(frm_ms, to_ms, None, include_unverified, group_id)
             if self._moment_attributed(m)
         ]
         by_edge: dict[tuple[str, str, str], list[Mapping[str, Any]]] = defaultdict(list)  # (from, to, meeting)

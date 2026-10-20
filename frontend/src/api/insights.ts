@@ -267,13 +267,14 @@ function qs(params: Record<string, string | number | null | undefined>): string 
 }
 
 export const insightsApi = {
-  overview: (p: { bucket?: InsightsBucket; speaker?: string | null; tag?: string | null } = {}) =>
+  overview: (p: { bucket?: InsightsBucket; speaker?: string | null; tag?: string | null; group?: string | null } = {}) =>
     request<InsightsOverview>(`/api/insights/overview${qs(p)}`),
   person: (speakerId: string, bucket?: InsightsBucket) =>
     request<InsightsPerson>(`/api/insights/person/${encodeURIComponent(speakerId)}${qs({ bucket })}`),
   meeting: (meetingId: string) =>
     request<InsightsMeetingSignals>(`/api/insights/meeting/${encodeURIComponent(meetingId)}`),
-  dyads: (bucket?: InsightsBucket) => request<InsightsDyads>(`/api/insights/dyads${qs({ bucket })}`),
+  dyads: (bucket?: InsightsBucket, group?: string | null) =>
+    request<InsightsDyads>(`/api/insights/dyads${qs({ bucket, group })}`),
   find: (q: string, limit = 5) =>
     request<{ query: string; results: InsightsFindResult[] }>(`/api/insights/find${qs({ q, limit })}`),
   playbook: (speakerId: string) =>

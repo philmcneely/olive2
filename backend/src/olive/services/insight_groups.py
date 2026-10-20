@@ -181,6 +181,9 @@ class InsightGroupService:
         with self.db.connect() as conn:
             return conn.execute(text("SELECT 1 FROM insight_groups WHERE id = :id"), {"id": group_id}).first() is not None
 
+    def exists(self, group_id: str) -> bool:
+        return self._exists(group_id)
+
     def add_members(self, group_id: str, meeting_ids: Sequence[str]) -> dict[str, Any] | None:
         """Add meetings (duplicates and unknown ids are ignored); snapshot when membership changed."""
         if not self._exists(group_id):
@@ -293,6 +296,61 @@ class InsightGroupService:
             "coverage": {"analyzedMembers": analyzed, "totalMembers": len(members)},
             "series": series,
         }
+
+    def _corpus_aggregate(self) -> dict[str, Any]:
+        """Whole-corpus baseline: per-axis mean of per-meeting means over every analyzed meeting.
+
+        The same roll-up ``aggregate_group`` applies to a group's members, over all meetings.
+        """
+        with self.db.connect() as conn:
+            total = conn.execute(text("SELECT COUNT(*) FROM meetings")).scalar_one()
+            signals = conn.execute(
+                text(
+                    "SELECT s.meeting_id, s.dimensions FROM meeting_speaker_signals s"
+                    " JOIN meetings m ON m.id = s.meeting_id ORDER BY m.start_time, m.id"
+                )
+            ).mappings().all()
+        per_meeting: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for row in signals:
+            per_meeting[row["meeting_id"]]  # an analyzed meeting counts even when it has no numeric axis
+            for axis, val in _parse_dimensions(row["dimensions"]).items():
+                per_meeting[row["meeting_id"]][axis].append(val)
+        by_axis: dict[str, list[float]] = defaultdict(list)
+        for axes in per_meeting.values():
+            for axis, vals in axes.items():
+                by_axis[axis].append(_round(math.fsum(vals) / len(vals)))
+        return {
+            "scores": {a: _round(math.fsum(v) / len(v)) for a, v in sorted(by_axis.items())},
+            "coverage": {"analyzedMeetings": len(per_meeting), "totalMeetings": int(total)},
+            "meetingIds": list(per_meeting),
+        }
+
+    def compare(self, group_ids: Sequence[str], include_default: bool = True) -> dict[str, Any]:
+        """Per-axis scores of several groups side by side, optionally against the whole corpus.
+
+        Axes are the union across the compared groups and the default; a score is absent where a group
+        has no data for that axis. Unknown ids are skipped and repeats collapse (the API 404s first).
+        """
+        groups: list[dict[str, Any]] = []
+        for gid in dict.fromkeys(str(g) for g in group_ids):
+            with self.db.connect() as conn:
+                head = self._fetch(conn, gid)
+            agg = self.aggregate_group(gid) if head else None
+            if head is None or agg is None:
+                continue
+            groups.append(
+                {
+                    "id": head["id"],
+                    "name": head["name"],
+                    "memberCount": head["memberCount"],
+                    "scores": agg["axes"],
+                    "coverage": agg["coverage"],
+                    "meetingIds": [p["meetingId"] for p in agg["series"] if p["axisScores"]],
+                }
+            )
+        default = self._corpus_aggregate() if include_default else None
+        axes = sorted({a for g in groups for a in g["scores"]} | set(default["scores"] if default else ()))
+        return {"axes": axes, "groups": groups, "default": default}
 
     def snapshot_group(self, group_id: str, reason: str) -> dict[str, Any] | None:
         agg = self.aggregate_group(group_id)

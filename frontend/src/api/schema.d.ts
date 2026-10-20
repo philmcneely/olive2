@@ -90,6 +90,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/insights/groups/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compare Insight Groups Route */
+        post: operations["compare_insight_groups_route_api_insights_groups_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/insights/groups/{group_id}": {
         parameters: {
             query?: never;
@@ -3512,6 +3529,54 @@ export interface components {
             /** Memberseries */
             memberSeries: components["schemas"]["InsightGroupMemberPoint"][];
         };
+        /**
+         * InsightGroupCompareDefault
+         * @description The whole-corpus baseline the groups are compared against.
+         */
+        InsightGroupCompareDefault: {
+            /** Scores */
+            scores?: {
+                [key: string]: number;
+            };
+            coverage: components["schemas"]["InsightGroupCompareDefaultCoverage"];
+            /** Meetingids */
+            meetingIds?: string[];
+        };
+        /** InsightGroupCompareDefaultCoverage */
+        InsightGroupCompareDefaultCoverage: {
+            /** Analyzedmeetings */
+            analyzedMeetings: number;
+            /** Totalmeetings */
+            totalMeetings: number;
+        };
+        /**
+         * InsightGroupCompareGroup
+         * @description One compared group: its per-axis scores and the analyzed meetings behind them (drill-down).
+         */
+        InsightGroupCompareGroup: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Membercount */
+            memberCount: number;
+            /** Scores */
+            scores?: {
+                [key: string]: number;
+            };
+            coverage: components["schemas"]["InsightGroupCoverage"];
+            /** Meetingids */
+            meetingIds?: string[];
+        };
+        /** InsightGroupCompare */
+        InsightGroupCompare: {
+            /** Axes */
+            axes: string[];
+            /** Groups */
+            groups: components["schemas"]["InsightGroupCompareGroup"][];
+            /** @default null */
+            default: components["schemas"]["InsightGroupCompareDefault"] | null;
+        };
         /** TranscriptImportSpeaker */
         TranscriptImportSpeaker: {
             /** Label */
@@ -3671,6 +3736,26 @@ export interface operations {
         };
     };
     create_insight_group_route_api_insights_groups_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    compare_insight_groups_route_api_insights_groups_compare_post: {
         parameters: {
             query?: never;
             header?: never;

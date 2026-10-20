@@ -859,6 +859,23 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         )
         return JSONResponse(group, status_code=201)
 
+    @app.post("/api/insights/groups/compare")
+    async def compare_insight_groups_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        ids = body.get("groupIds") if body else None
+        include_default = body.get("includeDefault", True) if body else True
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or not isinstance(include_default, bool):
+            return JSONResponse(
+                {"error": "groupIds must be a list of strings and includeDefault a boolean"}, status_code=400
+            )
+        svc = get_insight_group_service()
+        for gid in dict.fromkeys(ids):
+            if not await asyncio.to_thread(svc.exists, gid):
+                return _group_not_found()
+        return JSONResponse(await asyncio.to_thread(svc.compare, ids, include_default))
+
     @app.get("/api/insights/groups/{group_id}")
     async def get_insight_group_route(group_id: str) -> JSONResponse:
         if (off := _insights_disabled()) is not None:
@@ -931,6 +948,9 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         if (off := _insights_disabled()) is not None:
             return off
         q = request.query_params
+        group_id = q.get("group") or None
+        if group_id is not None and not await asyncio.to_thread(get_insight_group_service().exists, group_id):
+            return _group_not_found()
         try:
             res = await asyncio.to_thread(
                 get_insights_query_service().overview,
@@ -939,6 +959,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                 q.get("speaker") or None,
                 q.get("tag") or None,
                 q.get("bucket") or "month",
+                group_id=group_id,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -975,6 +996,9 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         if (off := _insights_disabled()) is not None:
             return off
         q = request.query_params
+        group_id = q.get("group") or None
+        if group_id is not None and not await asyncio.to_thread(get_insight_group_service().exists, group_id):
+            return _group_not_found()
         try:
             res = await asyncio.to_thread(
                 get_insights_query_service().dyads,
@@ -982,6 +1006,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                 q.get("from") or None,
                 q.get("to") or None,
                 q.get("bucket") or "month",
+                group_id=group_id,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -3245,6 +3270,10 @@ def export_openapi_schema() -> dict[str, Any]:
         s.InsightGroupSnapshot,
         s.InsightGroupChange,
         s.InsightGroupTrends,
+        s.InsightGroupCompare,
+        s.InsightGroupCompareGroup,
+        s.InsightGroupCompareDefault,
+        s.InsightGroupCompareDefaultCoverage,
         s.TranscriptImportResult,
     ]
     for model_cls in domain_models:

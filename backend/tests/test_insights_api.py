@@ -674,5 +674,52 @@ def test_groups_gated_when_disabled(tmp_path: Path, disabled: None) -> None:
 
 def test_openapi_export_includes_insight_group_models() -> None:
     schemas = export_openapi_schema()["components"]["schemas"]
-    for name in ("InsightGroup", "InsightGroupList", "InsightGroupAggregate", "InsightGroupTrends", "InsightGroupSnapshot", "InsightGroupMember", "InsightGroupMemberPoint"):
+    for name in ("InsightGroupCompare", "InsightGroupCompareGroup", "InsightGroupCompareDefault", "InsightGroup", "InsightGroupList", "InsightGroupAggregate", "InsightGroupTrends", "InsightGroupSnapshot", "InsightGroupMember", "InsightGroupMemberPoint"):
         assert name in schemas, name
+
+
+def test_overview_and_dyads_group_scope(env: Env) -> None:
+    gid = _group(env)["id"]
+    env.client.post(f"/api/insights/groups/{gid}/members", json={"meetingIds": ["m0", "m1"]})
+    assert env.client.put("/api/insights/me", json={"speakerId": ME, "aliases": []}).status_code == 200
+    res = env.client.get("/api/insights/overview", params={"group": gid})
+    assert res.status_code == 200
+    body = s.InsightsOverview.model_validate(res.json())
+    assert body.coverage.totalMeetings == 2
+    assert {m for p in body.series["warmth"] for m in p.meetingIds} == {"m0", "m1"}
+    dy = env.client.get("/api/insights/dyads", params={"group": gid})
+    assert dy.status_code == 200
+    assert {m for d in dy.json()["dyads"] for m in d["meetingIds"]} <= {"m0", "m1"}
+    assert env.client.get("/api/insights/overview", params={"group": "nope"}).status_code == 404
+    assert env.client.get("/api/insights/dyads", params={"group": "nope"}).status_code == 404
+    # blank group param means the whole corpus
+    assert env.client.get("/api/insights/overview", params={"group": ""}).json()["coverage"]["totalMeetings"] == 5
+
+
+def test_groups_compare_shape_and_options(env: Env) -> None:
+    a = _group(env, name="A")["id"]
+    b = _group(env, name="B")["id"]
+    env.client.post(f"/api/insights/groups/{a}/members", json={"meetingIds": ["m0"]})
+    env.client.post(f"/api/insights/groups/{b}/members", json={"meetingIds": ["m1", "m2"]})
+    res = env.client.post("/api/insights/groups/compare", json={"groupIds": [a, b]})
+    assert res.status_code == 200, res.text
+    body = s.InsightGroupCompare.model_validate(res.json())
+    assert "warmth" in body.axes
+    assert [g.id for g in body.groups] == [a, b]
+    assert body.groups[0].scores["warmth"] == pytest.approx(0.45)
+    assert body.default is not None and "warmth" in body.default.scores
+    off = env.client.post("/api/insights/groups/compare", json={"groupIds": [a], "includeDefault": False})
+    assert off.status_code == 200 and off.json()["default"] is None
+
+
+def test_groups_compare_errors_and_gating(env: Env, tmp_path: Path) -> None:
+    a = _group(env)["id"]
+    assert env.client.post("/api/insights/groups/compare", json={"groupIds": [a, "nope"]}).status_code == 404
+    for bad in ({}, {"groupIds": "x"}, {"groupIds": [1]}, {"groupIds": [a], "includeDefault": "yes"}):
+        assert env.client.post("/api/insights/groups/compare", json=bad).status_code == 400, bad
+    assert env.client.post("/api/insights/groups/compare", content=b"nope").status_code == 400
+
+
+def test_groups_compare_gated_when_disabled(tmp_path: Path, disabled: None) -> None:
+    e = Env(tmp_path)
+    assert e.client.post("/api/insights/groups/compare", json={"groupIds": []}).status_code == 404

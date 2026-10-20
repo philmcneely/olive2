@@ -11,6 +11,7 @@ import {
   type InsightGroupTrends,
 } from "../api/insightGroups";
 import { InsightsApiError, insightsApi, meetingHref } from "../api/insights";
+import { InsightGroupCompareSection } from "./InsightGroupCompare";
 
 type Open = (meetingId: string, startMs?: number | null) => void;
 
@@ -854,6 +855,7 @@ export function InsightGroupsView({ onNavigate }: { onNavigate: (path: string) =
               ))}
             </div>
           )}
+          {groups.length > 0 && <InsightGroupCompareSection groups={groups} onOpen={open} />}
         </>
       )}
 
