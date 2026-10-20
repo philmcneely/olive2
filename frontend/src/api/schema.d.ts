@@ -72,6 +72,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/insights/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Insight Groups Route */
+        get: operations["list_insight_groups_route_api_insights_groups_get"];
+        put?: never;
+        /** Create Insight Group Route */
+        post: operations["create_insight_group_route_api_insights_groups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Insight Group Route */
+        get: operations["get_insight_group_route_api_insights_groups__group_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Insight Group Route */
+        delete: operations["delete_insight_group_route_api_insights_groups__group_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Insight Group Route */
+        patch: operations["update_insight_group_route_api_insights_groups__group_id__patch"];
+        trace?: never;
+    };
+    "/api/insights/groups/{group_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Insight Group Members Route */
+        post: operations["add_insight_group_members_route_api_insights_groups__group_id__members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/groups/{group_id}/members/{meeting_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Insight Group Member Route */
+        delete: operations["remove_insight_group_member_route_api_insights_groups__group_id__members__meeting_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/groups/{group_id}/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Insight Group Trends Route */
+        get: operations["get_insight_group_trends_route_api_insights_groups__group_id__trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/insights/groups/{group_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Snapshot Insight Group Route */
+        post: operations["snapshot_insight_group_route_api_insights_groups__group_id__snapshot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/insights/overview": {
         parameters: {
             query?: never;
@@ -3291,6 +3396,122 @@ export interface components {
             /** Aliases */
             aliases?: string[];
         };
+        /** InsightGroupAggregate */
+        InsightGroupAggregate: {
+            /** Axes */
+            axes?: {
+                [key: string]: number;
+            };
+            moments: components["schemas"]["InsightsMomentCounts"];
+            coverage: components["schemas"]["InsightGroupCoverage"];
+            /** Series */
+            series?: components["schemas"]["InsightGroupMemberPoint"][];
+        };
+        /** InsightGroupCoverage */
+        InsightGroupCoverage: {
+            /** Analyzedmembers */
+            analyzedMembers: number;
+            /** Totalmembers */
+            totalMembers: number;
+        };
+        /** InsightGroupMember */
+        InsightGroupMember: {
+            /** Meetingid */
+            meetingId: string;
+            /** Title */
+            title: string;
+            /** Startms */
+            startMs: number;
+            /** Addedat */
+            addedAt: number;
+        };
+        /**
+         * InsightGroupMemberPoint
+         * @description One member meeting on the group's timeline (drill-down via meetingId + startMs).
+         */
+        InsightGroupMemberPoint: {
+            /** Meetingid */
+            meetingId: string;
+            /** Title */
+            title: string;
+            /** Startms */
+            startMs: number;
+            /** Axisscores */
+            axisScores?: {
+                [key: string]: number;
+            };
+            moments: components["schemas"]["InsightsMomentCounts"];
+        };
+        /** InsightGroup */
+        InsightGroup: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default null
+             */
+            description: string | null;
+            /**
+             * Axes
+             * @default null
+             */
+            axes: string[] | null;
+            /**
+             * Membercount
+             * @default 0
+             */
+            memberCount: number;
+            /** Createdat */
+            createdAt: number;
+            /** Updatedat */
+            updatedAt: number;
+            /**
+             * Members
+             * @default null
+             */
+            members: components["schemas"]["InsightGroupMember"][] | null;
+            /** @default null */
+            aggregate: components["schemas"]["InsightGroupAggregate"] | null;
+        };
+        /** InsightGroupList */
+        InsightGroupList: {
+            /** Groups */
+            groups: components["schemas"]["InsightGroup"][];
+        };
+        /** InsightGroupSnapshot */
+        InsightGroupSnapshot: {
+            /** Createdat */
+            createdAt: number;
+            /** Membercount */
+            memberCount: number;
+            /** Axes */
+            axes?: {
+                [key: string]: number;
+            };
+            /**
+             * Reason
+             * @default null
+             */
+            reason: string | null;
+        };
+        /**
+         * InsightGroupChange
+         * @description Result of a membership change: the new aggregate and the snapshot taken (None if nothing changed).
+         */
+        InsightGroupChange: {
+            aggregate: components["schemas"]["InsightGroupAggregate"];
+            /** @default null */
+            snapshot: components["schemas"]["InsightGroupSnapshot"] | null;
+        };
+        /** InsightGroupTrends */
+        InsightGroupTrends: {
+            /** Snapshots */
+            snapshots: components["schemas"]["InsightGroupSnapshot"][];
+            /** Memberseries */
+            memberSeries: components["schemas"]["InsightGroupMemberPoint"][];
+        };
         /** TranscriptImportSpeaker */
         TranscriptImportSpeaker: {
             /** Label */
@@ -3425,6 +3646,264 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_insight_groups_route_api_insights_groups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_insight_group_route_api_insights_groups_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_insight_group_route_api_insights_groups__group_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_insight_group_route_api_insights_groups__group_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_insight_group_route_api_insights_groups__group_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_insight_group_members_route_api_insights_groups__group_id__members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_insight_group_member_route_api_insights_groups__group_id__members__meeting_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_insight_group_trends_route_api_insights_groups__group_id__trends_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshot_insight_group_route_api_insights_groups__group_id__snapshot_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

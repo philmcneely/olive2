@@ -18,6 +18,7 @@ import { Combobox } from "./components/Combobox";
 import { ConfirmHostRoot, Modal as UiModal, ThemeToggle, ToastProvider, confirmAction, notify } from "./components/ui";
 import { SpeakerCombobox, SpeakerStatusBadges } from "./components/SpeakerCombobox";
 import { InsightsView } from "./components/InsightsView";
+import { AddToGroupModal, InsightGroupsView } from "./components/InsightGroupsView";
 import { ImportTranscriptModal } from "./components/ImportTranscriptModal";
 import {
   ENGINE_OPTIONS,
@@ -348,7 +349,7 @@ function MeetingChatRuntime({ meetingId, initialMessages }: { meetingId: string;
   );
 }
 
-type TabKey = "meetings" | "speakers" | "templates" | "logs" | "backup" | "usage" | "insights";
+type TabKey = "meetings" | "speakers" | "templates" | "logs" | "backup" | "usage" | "insights" | "groups";
 
 /** Transcript moment to scroll to and highlight when a meeting is opened via `?t={startMs}&q={quote}`. */
 interface MeetingFocus {
@@ -400,6 +401,10 @@ function parseLocation(pathname: string): { tab: TabKey; meetingId: string | nul
     return { tab: "insights", meetingId: null };
   }
 
+  if (clean === "groups") {
+    return { tab: "groups", meetingId: null };
+  }
+
   return { tab: "meetings", meetingId: null };
 }
 
@@ -411,6 +416,7 @@ const NAV_TABS: { key: TabKey; path: string; label: string }[] = [
   { key: "backup", path: "/backup", label: "Backup" },
   { key: "usage", path: "/usage", label: "Usage" },
   { key: "insights", path: "/insights", label: "Insights" },
+  { key: "groups", path: "/groups", label: "Groups" },
 ];
 
 const TAB_ICON_CONTENT: Record<TabKey, ReactNode> = {
@@ -441,6 +447,14 @@ const TAB_ICON_CONTENT: Record<TabKey, ReactNode> = {
   ),
   usage: <path d="M4 20V10M10 20V4M16 20v-7M2 20h20" />,
   insights: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
+  groups: (
+    <>
+      <rect x="3" y="3" width="8" height="8" rx="1" />
+      <rect x="13" y="3" width="8" height="8" rx="1" />
+      <rect x="3" y="13" width="8" height="8" rx="1" />
+      <path d="M17 14v6M14 17h6" />
+    </>
+  ),
 };
 
 function TabIcon({ name }: { name: TabKey }): ReactElement {
@@ -658,7 +672,7 @@ export function App(): ReactElement {
           aria-expanded={showMoreNav}
           aria-label="More sections"
           onClick={() => setShowMoreNav((v) => !v)}
-          className={activeTab === "logs" || activeTab === "backup" || activeTab === "insights" ? "dock-active" : ""}
+          className={activeTab === "logs" || activeTab === "backup" || activeTab === "insights" || activeTab === "groups" ? "dock-active" : ""}
         >
           <Ellipsis className="h-5 w-5" aria-hidden="true" />
           <span className="dock-label">More</span>
@@ -667,7 +681,7 @@ export function App(): ReactElement {
       {showMoreNav && (
         <div className="fixed inset-x-4 bottom-20 z-40 sm:hidden">
           <ul className="menu rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
-            {(NAV_TABS.filter((t) => t.key === "logs" || t.key === "backup" || t.key === "insights")).map((tab) => (
+            {(NAV_TABS.filter((t) => t.key === "logs" || t.key === "backup" || t.key === "insights" || t.key === "groups")).map((tab) => (
               <li key={tab.key}>
                 <a
                   href={tab.path}
@@ -718,6 +732,8 @@ export function App(): ReactElement {
           <UsageView onSelectMeeting={(id) => navigate(`/meetings/${id}`)} />
         ) : activeTab === "insights" ? (
           <InsightsView onNavigate={navigate} speakers={knownSpeakers.map((s) => ({ id: s.id, name: s.name }))} />
+        ) : activeTab === "groups" ? (
+          <InsightGroupsView onNavigate={navigate} />
         ) : (
           <BackupRestoreView
             onRestoreComplete={() => {
@@ -1093,6 +1109,7 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
   const [showImportModal, setShowImportModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -1386,6 +1403,11 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
             Select visible ({meetings.length})
           </button>
           {selectedIds.length > 0 && (
+            <button type="button" onClick={() => setShowGroupModal(true)} className="btn btn-primary btn-soft min-h-[36px]">
+              Add to group
+            </button>
+          )}
+          {selectedIds.length > 0 && (
             <button type="button" onClick={handleClearSelection} className="btn min-h-[36px] hover:border-error/60 hover:text-error">
               Clear
             </button>
@@ -1542,6 +1564,17 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
           )}
           <div ref={loadMoreSentinelRef} aria-hidden="true" className="h-1 w-full" />
         </div>
+      )}
+
+      {showGroupModal && (
+        <AddToGroupModal
+          meetingIds={selectedIds}
+          onClose={() => setShowGroupModal(false)}
+          onDone={() => {
+            setShowGroupModal(false);
+            exitSelectMode();
+          }}
+        />
       )}
 
       {showBulkModal && (
