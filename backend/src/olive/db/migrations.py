@@ -203,6 +203,29 @@ CREATE_TABLE_STATEMENTS: list[str] = [
     provider TEXT,
     created_at INTEGER NOT NULL
   )""",
+    """CREATE TABLE IF NOT EXISTS insight_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    axes TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS insight_group_members (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES insight_groups(id),
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    added_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS insight_group_snapshots (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES insight_groups(id),
+    created_at INTEGER NOT NULL,
+    member_count INTEGER NOT NULL,
+    axes TEXT NOT NULL,
+    meeting_ids TEXT NOT NULL,
+    reason TEXT
+  )""",
     """CREATE TABLE IF NOT EXISTS alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
@@ -232,6 +255,10 @@ CREATE_INDEX_STATEMENTS: list[str] = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_speaker_aliases ON speaker_aliases(alias_norm, speaker_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_name_proposals_label ON meeting_speaker_name_proposals(meeting_id, speaker_label)",
     "CREATE INDEX IF NOT EXISTS idx_name_proposals_meeting ON meeting_speaker_name_proposals(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_members_group ON insight_group_members(group_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_unique ON insight_group_members(group_id, meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_members_meeting ON insight_group_members(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_snapshots_group ON insight_group_snapshots(group_id, created_at)",
 ]
 
 ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [

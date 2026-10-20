@@ -279,6 +279,44 @@ class MeetingSpeakerNameProposalModel(Base):
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class InsightGroupModel(Base):
+    """A user-named group of meetings analysed together (Insight Groups)."""
+
+    __tablename__ = "insight_groups"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    axes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InsightGroupMemberModel(Base):
+    """Membership of a meeting in a group; a meeting may belong to many groups."""
+
+    __tablename__ = "insight_group_members"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    group_id: Mapped[str] = mapped_column(Text, ForeignKey("insight_groups.id"), nullable=False)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    added_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InsightGroupSnapshotModel(Base):
+    """Aggregated axis scores of a group at a point in time (historical trend)."""
+
+    __tablename__ = "insight_group_snapshots"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    group_id: Mapped[str] = mapped_column(Text, ForeignKey("insight_groups.id"), nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    axes: Mapped[str] = mapped_column(Text, nullable=False)
+    meeting_ids: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 Index("idx_meetings_start_time", MeetingModel.start_time.desc())
 Index("idx_recordings_meeting", RecordingModel.meeting_id)
 Index(
@@ -312,11 +350,23 @@ Index(
     unique=True,
 )
 Index("idx_name_proposals_meeting", MeetingSpeakerNameProposalModel.meeting_id)
+Index("idx_group_members_group", InsightGroupMemberModel.group_id)
+Index(
+    "idx_group_members_unique",
+    InsightGroupMemberModel.group_id,
+    InsightGroupMemberModel.meeting_id,
+    unique=True,
+)
+Index("idx_group_members_meeting", InsightGroupMemberModel.meeting_id)
+Index("idx_group_snapshots_group", InsightGroupSnapshotModel.group_id, InsightGroupSnapshotModel.created_at)
 
 __all__ = [
     "ArtifactModel",
     "Base",
     "ChatMessageModel",
+    "InsightGroupMemberModel",
+    "InsightGroupModel",
+    "InsightGroupSnapshotModel",
     "LogModel",
     "MeetingModel",
     "MeetingMomentModel",
