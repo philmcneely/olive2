@@ -201,3 +201,123 @@ def test_llm_api_endpoints(tmp_path: Path) -> None:
         assert test_res.status_code == 400
 
     handle.engine.dispose()
+
+
+class _FakeMessage:
+    def __init__(self, content: str = "", reasoning_content: str = "") -> None:
+        self.content = content
+        self.reasoning_content = reasoning_content
+
+
+class _FakeChoice:
+    def __init__(self, message: _FakeMessage) -> None:
+        self.message = message
+
+
+class _FakeResponse:
+    def __init__(self, message: _FakeMessage) -> None:
+        self.choices = [_FakeChoice(message)]
+        self.usage = None
+
+
+async def test_disables_thinking_on_custom_base_and_falls_back_to_reasoning_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A self-hosted (custom base) non-reasoning model gets enable_thinking=False,
+    and an empty content body falls back to reasoning_content."""
+    handle = create_db(str(tmp_path / "db.sqlite"))
+    service = LlmService(db=handle.engine, config_dir=str(tmp_path))
+    await service.update_settings(
+        {
+            "defaultProvider": "openai",
+            "defaultModel": "qwen3.8-27b",
+            "providers": {"openai": {"baseUrl": "http://127.0.0.1:8011/v1", "apiKey": "local"}},
+        }
+    )
+
+    captured: dict = {}
+
+    import olive.services.llm as llm_mod
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(_FakeMessage(content="", reasoning_content='{"moments": []}'))
+
+    monkeypatch.setattr(llm_mod.any_llm, "acompletion", fake_acompletion)
+
+    res = await service.generate_text(
+        {"model": "qwen3.8-27b", "prompt": "hi", "provider": "openai"}
+    )
+
+    assert captured.get("extra_body", {}).get("chat_template_kwargs", {}).get(
+        "enable_thinking"
+    ) is False
+    # Every completion is bounded so a wedged endpoint cannot hang a worker.
+    assert captured.get("timeout") == 600.0
+    assert res.text == '{"moments": []}'
+    handle.engine.dispose()
+
+
+async def test_llm_timeout_is_operator_tunable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OLIVE_LLM_TIMEOUT overrides the default completion timeout."""
+    monkeypatch.setenv("OLIVE_LLM_TIMEOUT", "42")
+    handle = create_db(str(tmp_path / "db.sqlite"))
+    service = LlmService(db=handle.engine, config_dir=str(tmp_path))
+    await service.update_settings(
+        {
+            "defaultProvider": "openai",
+            "defaultModel": "gpt-4o-mini",
+            "providers": {"openai": {"apiKey": "sk-test"}},
+        }
+    )
+
+    captured: dict = {}
+
+    import olive.services.llm as llm_mod
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(_FakeMessage(content="ok"))
+
+    monkeypatch.setattr(llm_mod.any_llm, "acompletion", fake_acompletion)
+
+    res = await service.generate_text(
+        {"model": "gpt-4o-mini", "prompt": "hi", "provider": "openai"}
+    )
+    assert captured.get("timeout") == 42.0
+    assert res.text == "ok"
+    handle.engine.dispose()
+
+
+async def test_no_thinking_override_without_custom_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default cloud base (no custom baseUrl) must not receive chat_template_kwargs."""
+    handle = create_db(str(tmp_path / "db.sqlite"))
+    service = LlmService(db=handle.engine, config_dir=str(tmp_path))
+    await service.update_settings(
+        {
+            "defaultProvider": "openai",
+            "defaultModel": "gpt-4o-mini",
+            "providers": {"openai": {"apiKey": "sk-test"}},
+        }
+    )
+
+    captured: dict = {}
+
+    import olive.services.llm as llm_mod
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(_FakeMessage(content="ok"))
+
+    monkeypatch.setattr(llm_mod.any_llm, "acompletion", fake_acompletion)
+
+    res = await service.generate_text(
+        {"model": "gpt-4o-mini", "prompt": "hi", "provider": "openai"}
+    )
+    assert "extra_body" not in captured
+    assert res.text == "ok"
+    handle.engine.dispose()
