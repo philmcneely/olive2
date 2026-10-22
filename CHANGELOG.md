@@ -17,7 +17,7 @@ every section newer than the previous tag into the GitHub release notes.
 
 ### Changed
 
-- **Cross-site request protection.** Browser requests that change data (POST/PUT/PATCH/DELETE) are now rejected with 403 when their `Origin` is not Olive itself, localhost, the bind host, or an entry in the new `OLIVE_ALLOWED_ORIGINS` list. Clients that send no `Origin` (the iOS Shortcut, curl, MCP clients, webhooks) are unaffected. Set `OLIVE_ALLOWED_HOSTS` to also reject unexpected `Host` headers (DNS-rebinding protection); it is off by default.
+- **Cross-site request protection.** Browser requests that change data (POST/PUT/PATCH/DELETE) are now rejected with 403 when their `Origin` is not Olive itself, localhost, the bind host, or an entry in the new `OLIVE_ALLOWED_ORIGINS` list. Clients that send no `Origin` (the iOS Shortcut, curl, MCP clients, webhooks) are unaffected. Set `OLIVE_ALLOWED_HOSTS` (bare hostnames, comma-separated, ports ignored; localhost is always allowed) to also reject requests, reads included, whose `Host` header is not listed (DNS-rebinding protection); it is off by default, and Olive logs a warning at startup when it serves on a non-loopback address without it.
 - **Faster page loads** — responses are gzip-compressed on the wire (the app bundle drops from ~1.05MB to ~300KB) and content-hashed static assets are cached long-term, so the app loads noticeably quicker on repeat visits.
 
 ### Fixed

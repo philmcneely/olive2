@@ -198,8 +198,8 @@ def test_host_check_on_rejects_unknown_host_and_allows_listed(
         "10.0.0.9:80",
     ):
         assert client.delete("/api/logs", headers={"Host": host}).status_code == 200, host
-    # reads and no-Origin semantics are unchanged: only mutating methods are host-checked
-    assert client.get("/api/config", headers={"Host": "rebind.evil.example"}).status_code == 200
+    # reads are host-checked too once the allowlist is on
+    assert client.get("/api/config", headers={"Host": "rebind.evil.example"}).status_code == 403
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])

@@ -686,8 +686,9 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     # Outermost: CSRF Origin guard (+ opt-in Host check) for mutating methods. See security.py.
-    from .security import MutationGuardMiddleware
+    from .security import MutationGuardMiddleware, warn_if_rebinding_unprotected
 
+    warn_if_rebinding_unprotected(bind_host)
     app.add_middleware(MutationGuardMiddleware, bind_host=bind_host)
 
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
