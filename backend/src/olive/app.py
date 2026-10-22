@@ -685,6 +685,11 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
 
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+    # Outermost: CSRF Origin guard (+ opt-in Host check) for mutating methods. See security.py.
+    from .security import MutationGuardMiddleware
+
+    app.add_middleware(MutationGuardMiddleware, bind_host=bind_host)
+
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:
         from .mcp_server import handle_mcp_request
