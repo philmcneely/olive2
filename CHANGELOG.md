@@ -8,6 +8,21 @@ day its changes merged (`## [YYYY-MM-DD]`), with entries grouped under
 `Added` / `Changed` / `Fixed` — pushing a tag publishes the image and turns
 every section newer than the previous tag into the GitHub release notes.
 
+## [2026-10-22]
+
+### Added
+
+- **Insight Groups** — build your own named sets of meetings and analyze them as a unit. A meeting can belong to many groups, groups grow over time, and each group tracks its trend per axis as snapshots. The Insights tab gains a scope dropdown (analyze All meetings or a single group) and a multi-group comparison against the default scope.
+
+### Changed
+
+- **Faster page loads** — responses are gzip-compressed on the wire (the app bundle drops from ~1.05MB to ~300KB) and content-hashed static assets are cached long-term, so the app loads noticeably quicker on repeat visits.
+
+### Fixed
+
+- **Speaker-name proposals respect who a name belongs to.** The naming pass previously treated any name spoken in a turn as the speaker's own, so "Hey Bill" could label the current speaker as Bill. It now distinguishes a self-introduction ("I'm Phil" → the speaker) from a name said to someone else ("Hey Bill" → the person addressed), and only proposes an addressed name in a two-speaker meeting where the addressee is unambiguous. Proposals still require your confirmation.
+- **Local LLM transcription/analysis no longer returns empty results on thinking models.** Self-hosted models that stream their reasoning separately (e.g. qwen3.x via vLLM/llama.cpp) had their thinking disabled so the answer lands in the response body, with a fallback that reads the reasoning stream if needed. Every LLM call is also time-bounded so a wedged local endpoint can't stall background work indefinitely.
+
 ## [2026-10-19]
 
 ### Fixed
@@ -18,6 +33,14 @@ every section newer than the previous tag into the GitHub release notes.
   The ML engines are also loaded once and reused across meetings instead of rebuilt per meeting, and a stalled stage is cancelled after `OLIVE_STAGE_STALL_TIMEOUT_SEC` (default 900s) of no progress (jobs merely waiting their turn are never cancelled) so one wedged stage can't block the queue.
 - **Queued background work now resumes automatically on restart.** The DBOS durable-execution runtime was launched lazily, only when a transcription request first arrived, so after a restart (redeploy, reboot, or an OOM-kill) the queue-runner thread never started on its own: an enqueued backlog sat idle and in-flight jobs were never recovered until some API call happened to wake it. DBOS is now launched at server startup, so the queue runner and crash recovery come up immediately and a pending backlog drains with no manual intervention.
 - **Recovered transcriptions no longer fail to decode after a restart.** A transcription whose audio was held only in memory (not yet written with an on-disk path in its job record) would die on recovery with "Either audio_path or audio_bytes must be provided", because the in-memory audio is gone once the process restarts. The audio-decode step now falls back to the recording's file on disk, looked up from the meeting, so a transcription interrupted by a restart or OOM-kill resumes instead of erroring out.
+## [2026-10-20]
+
+### Added
+
+- **Insights — cross-meeting analysis of tone, relationships, and communication.** A new Insights tab analyzes your whole meeting history (not one meeting at a time). An LLM pass over each transcript extracts per-speaker communication signals and notable moments — accusations, praise, conflict, repair — each with a verbatim quote, a timestamp, and a framework tag (e.g. Gottman criticism/contempt/defensiveness/stonewalling, nonviolent-communication). It then rolls those up into: your tone over time, who you bring out the best and worst in, relationship trajectories (warming vs cooling), wins and flags, per-person communication playbooks ("get to the point faster with X; give Y more context"), coaching takeaways, and a natural-language "find the call" search ("the meeting where I was accused of sabotage"). Every figure drills down to the exact meeting and transcript moment, judgments are labeled model-inferred and backed by quotes, and low-confidence/unidentified speakers are shown as unattributed rather than guessed. Local-only: all analysis runs through your configured local LLM and never leaves the box, and the feature ships **off by default** (`OLIVE_INSIGHTS_ENABLED`). Analysis runs automatically when a transcript finishes, and a backfill covers existing meetings; REST (`/api/insights/*`) and MCP tools (`insights_overview`, `person_insights`, `meeting_signals`, `find_insight_events`, `person_playbook`, and the gated `backfill_insights`) are available.
+- **A speaker-naming pass** proposes real names for generic "Speaker N" labels from how people are addressed in the conversation (with the evidence quote), so cross-meeting per-person analysis works on existing transcripts; you confirm the guesses, and confirmations flow into the analysis.
+- **Import transcripts without audio.** `POST /api/transcripts/import` and an Import Transcript button accept Zoom `.vtt`, SRT, or speaker-labeled text as a first-class meeting (no recording), with content-hash dedup and name-based speaker mapping — so meetings you only have a transcript for are searchable, summarizable, and included in Insights.
+- **`olive insights census`** — a read-only CLI report (meeting/transcript coverage, word/token volume, duration spread, speaker-identification coverage, month-by-month counts) for sizing and sanity before enabling Insights.
 
 ## [2026-10-16]
 

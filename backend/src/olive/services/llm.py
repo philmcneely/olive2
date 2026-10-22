@@ -1192,6 +1192,26 @@ class LlmService:
         if effective_reasoning and effective_reasoning != "off":
             kwargs["reasoning_effort"] = effective_reasoning
 
+        # Self-hosted OpenAI-compatible endpoints (vLLM / llama.cpp / ollama) accept
+        # ``chat_template_kwargs``. When the caller wants no reasoning, disable the
+        # model's thinking at the template level so the output token budget is not
+        # spent on a ``<think>`` block — qwen3.x and similar otherwise emit their
+        # reasoning into ``reasoning_content`` and leave ``content`` empty, which the
+        # extractor reads as a failed generation. Only ever sent to a custom base,
+        # never to a default cloud provider endpoint (which would 400 on it).
+        if custom_base and (not effective_reasoning or effective_reasoning == "off"):
+            extra_body = dict(kwargs.get("extra_body") or {})
+            ctk = dict(extra_body.get("chat_template_kwargs") or {})
+            ctk.setdefault("enable_thinking", False)
+            extra_body["chat_template_kwargs"] = ctk
+            kwargs["extra_body"] = extra_body
+
+        # Bound every completion so a hung or stalled self-hosted endpoint (vLLM
+        # OOM, a wedged llama.cpp slot) cannot hold a worker open forever. Large
+        # local models on slow GPUs legitimately take minutes per generation, so
+        # the ceiling is generous and operator-tunable via OLIVE_LLM_TIMEOUT.
+        kwargs.setdefault("timeout", float(os.environ.get("OLIVE_LLM_TIMEOUT", "600")))
+
         logger.info(
             "Executing LLM generation",
             {
@@ -1214,7 +1234,13 @@ class LlmService:
         choice = response.choices[0] if getattr(response, "choices", None) else None
         text_content = ""
         if choice and getattr(choice, "message", None):
-            text_content = getattr(choice.message, "content", "") or ""
+            # Prefer ``content``; fall back to ``reasoning_content`` for endpoints
+            # that stream the answer there when thinking could not be disabled.
+            text_content = (
+                getattr(choice.message, "content", "")
+                or getattr(choice.message, "reasoning_content", "")
+                or ""
+            )
 
         usage_obj = getattr(response, "usage", None)
         in_tok = int(getattr(usage_obj, "prompt_tokens", 0) or 0) if usage_obj else 0
