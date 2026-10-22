@@ -13,6 +13,7 @@ from uvicorn.config import LOGGING_CONFIG
 from .app import create_app
 from .logging_db import logger
 from .ml.model_store import ModelStorageError, download_local_models, ensure_models_volume
+from .services.sharing import RedactShareTokens
 from .settings import get_effective_hf_token, load_app_config, load_runtime_config, resolve_paths
 
 
@@ -24,6 +25,9 @@ def get_uvicorn_log_config() -> dict[str, Any]:
         '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s'
     )
     cfg["formatters"]["access"]["datefmt"] = "%Y-%m-%dT%H:%M:%S%z"
+    # Share links are bearer URLs: never write the raw token to the access log.
+    cfg.setdefault("filters", {})["redact_share_tokens"] = {"()": RedactShareTokens}
+    cfg["handlers"]["access"]["filters"] = ["redact_share_tokens"]
     return cfg
 
 
