@@ -20,6 +20,7 @@ import { SpeakerCombobox, SpeakerStatusBadges } from "./components/SpeakerCombob
 import { InsightsView } from "./components/InsightsView";
 import { AddToGroupModal, InsightGroupsView } from "./components/InsightGroupsView";
 import { ImportTranscriptModal } from "./components/ImportTranscriptModal";
+import { ExportShareMenu, type ShareConfig } from "./components/ExportShareMenu";
 import {
   ENGINE_OPTIONS,
   LOG_LEVEL_OPTIONS,
@@ -1926,6 +1927,7 @@ function MeetingDetailView({
   const [regenerating, setRegenerating] = useState(false);
   const [summaryGeneration, setSummaryGeneration] = useState<SummaryGenerationStatus | null>(null);
   const [copied, setCopied] = useState(false);
+  const [shareConfig, setShareConfig] = useState<ShareConfig | null>(null);
   const [confirmationNotice, setConfirmationNotice] = useState<string | null>(null);
   const [playingSegmentIndex, setPlayingSegmentIndex] = useState<number | null>(null);
   const playbackStopMsRef = useRef<number | null>(null);
@@ -2202,6 +2204,7 @@ function MeetingDetailView({
       }
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
+        setShareConfig({ shareLinksEnabled: cfg.shareLinksEnabled, shareDefaultTtlHours: cfg.shareDefaultTtlHours });
         if (cfg.localClusteringThreshold !== undefined) setCustomClusteringThreshold(cfg.localClusteringThreshold);
         if (cfg.localSimilarityThreshold !== undefined) setCustomSimilarityThreshold(cfg.localSimilarityThreshold);
         if (cfg.transcriptionProvider === "speechmatics" || cfg.transcriptionProvider === "assemblyai" || cfg.transcriptionProvider === "muse") {
@@ -2932,6 +2935,13 @@ function MeetingDetailView({
                   <span>{cancellingTranscription ? "Cancelling…" : "Cancel"}</span>
                 </button>
               )}
+
+              <ExportShareMenu
+                meetingId={meetingId}
+                title={detail.meeting.title}
+                hasTranscript={Boolean(detail.transcriptContent)}
+                config={shareConfig}
+              />
 
               <button
                 type="button"
