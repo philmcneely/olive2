@@ -685,6 +685,12 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
 
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+    # Outermost: CSRF Origin guard (+ opt-in Host check) for mutating methods. See security.py.
+    from .security import MutationGuardMiddleware, warn_if_rebinding_unprotected
+
+    warn_if_rebinding_unprotected(bind_host)
+    app.add_middleware(MutationGuardMiddleware, bind_host=bind_host)
+
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:
         from .mcp_server import handle_mcp_request
@@ -2781,11 +2787,19 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    def _effective_config_payload(config: Any) -> dict[str, Any]:
+        """Masked config for the UI; shareLinksEnabled is the EFFECTIVE value (env wins over stored)."""
+        from .services.sharing import share_links_enabled
+
+        payload = mask_app_config(config)
+        payload["shareLinksEnabled"] = share_links_enabled(config)
+        return payload
+
     @app.get("/api/config")
     async def get_config_route() -> JSONResponse:
         try:
             config = load_app_config(app_config_paths)
-            return JSONResponse(mask_app_config(config))
+            return JSONResponse(_effective_config_payload(config))
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -2796,6 +2810,12 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
             current = load_app_config(app_config_paths)
+            from .services.sharing import share_env_override_active
+
+            if share_env_override_active():
+                # The env var is authoritative: never let a settings save persist the
+                # effective (env-derived) flag, or it would outlive the variable.
+                body = {k: v for k, v in body.items() if k != "shareLinksEnabled"}
             merged = {**current.model_dump(), **body}
             for secret_field in ("hfToken", "speechmaticsApiKey", "assemblyaiApiKey", "museApiKey"):
                 if secret_field in body and is_masked_secret(body.get(secret_field)):
@@ -2809,7 +2829,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                     updated.transcriptionProvider,
                 )
             ingest_service.set_default_transcription_provider(updated.transcriptionProvider)
-            return JSONResponse({"status": "updated", "config": mask_app_config(updated)})
+            return JSONResponse({"status": "updated", "config": _effective_config_payload(updated)})
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
@@ -3195,6 +3215,17 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             return JSONResponse({"version": get_build_display(), "markdown": markdown})
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
+
+    from .routes_export_share import register_export_share_routes
+
+    # Must stay before the SPA catch-all below (it also owns /share/{token}).
+    register_export_share_routes(
+        app,
+        db=db,
+        meetings_dir=meetings_dir,
+        get_config=_current_app_config,
+        now_ms=opts.get("shareNowMs"),
+    )
 
     web_root = opts.get("webRoot") or opts.get("web_root")
     if web_root:

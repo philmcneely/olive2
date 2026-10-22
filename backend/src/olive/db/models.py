@@ -317,6 +317,23 @@ class InsightGroupSnapshotModel(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class MeetingShareLinkModel(Base):
+    """Revocable, expiring read-only share link; only sha256(token) is stored."""
+
+    __tablename__ = "meeting_share_links"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    include_summary: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_accessed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    access_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
 Index("idx_meetings_start_time", MeetingModel.start_time.desc())
 Index("idx_recordings_meeting", RecordingModel.meeting_id)
 Index(
@@ -359,6 +376,7 @@ Index(
 )
 Index("idx_group_members_meeting", InsightGroupMemberModel.meeting_id)
 Index("idx_group_snapshots_group", InsightGroupSnapshotModel.group_id, InsightGroupSnapshotModel.created_at)
+Index("idx_share_links_meeting", MeetingShareLinkModel.meeting_id)
 
 __all__ = [
     "ArtifactModel",
@@ -370,6 +388,7 @@ __all__ = [
     "LogModel",
     "MeetingModel",
     "MeetingMomentModel",
+    "MeetingShareLinkModel",
     "MeetingSpeakerModel",
     "MeetingSpeakerNameProposalModel",
     "MeetingSpeakerSignalModel",

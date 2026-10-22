@@ -12,14 +12,17 @@ every section newer than the previous tag into the GitHub release notes.
 
 ### Added
 
+- **Export & Share (backend)** — export any meeting's transcript as TXT, Markdown, SRT, VTT, PDF or DOCX, optionally with the summary and timestamps. Optional read-only share links (off by default; enable with the `shareLinksEnabled` setting or `OLIVE_SHARE_ENABLED=1`) give a revocable, expiring page with download buttons, never the audio. Links are stored hashed, expire after `shareDefaultTtlHours` (7 days by default), and a link is not an access control on a server that is otherwise open to your network.
 - **Insight Groups** — build your own named sets of meetings and analyze them as a unit. A meeting can belong to many groups, groups grow over time, and each group tracks its trend per axis as snapshots. The Insights tab gains a scope dropdown (analyze All meetings or a single group) and a multi-group comparison against the default scope.
 
 ### Changed
 
+- **Cross-site request protection.** Browser requests that change data (POST/PUT/PATCH/DELETE) are now rejected with 403 when their `Origin` is not Olive itself, localhost, the bind host, or an entry in the new `OLIVE_ALLOWED_ORIGINS` list. Clients that send no `Origin` (the iOS Shortcut, curl, MCP clients, webhooks) are unaffected. Set `OLIVE_ALLOWED_HOSTS` (bare hostnames, comma-separated, ports ignored; localhost is always allowed) to also reject requests, reads included, whose `Host` header is not listed (DNS-rebinding protection); it is off by default, and Olive logs a warning at startup when it serves on a non-loopback address without it.
 - **Faster page loads** — responses are gzip-compressed on the wire (the app bundle drops from ~1.05MB to ~300KB) and content-hashed static assets are cached long-term, so the app loads noticeably quicker on repeat visits.
 
 ### Fixed
 
+- **Share links enabled by `OLIVE_SHARE_ENABLED` no longer get saved into your settings.** Saving settings while the environment variable controls the flag now leaves the stored value alone, so removing the variable turns sharing off as expected.
 - **Speaker-name proposals respect who a name belongs to.** The naming pass previously treated any name spoken in a turn as the speaker's own, so "Hey Bill" could label the current speaker as Bill. It now distinguishes a self-introduction ("I'm Phil" → the speaker) from a name said to someone else ("Hey Bill" → the person addressed), and only proposes an addressed name in a two-speaker meeting where the addressee is unambiguous. Proposals still require your confirmation.
 - **Local LLM transcription/analysis no longer returns empty results on thinking models.** Self-hosted models that stream their reasoning separately (e.g. qwen3.x via vLLM/llama.cpp) had their thinking disabled so the answer lands in the response body, with a fallback that reads the reasoning stream if needed. Every LLM call is also time-bounded so a wedged local endpoint can't stall background work indefinitely.
 

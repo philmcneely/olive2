@@ -902,6 +902,7 @@ def delete_meeting(db: Engine, meeting_id: str, meetings_dir: str | None = None)
             "meeting_moments",
             "meeting_speaker_name_proposals",
             "insight_group_members",
+            "meeting_share_links",
             "transcript_imports",
             "stage_runs",
             "plaud_ingest_state",
