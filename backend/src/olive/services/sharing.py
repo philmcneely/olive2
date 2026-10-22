@@ -49,11 +49,13 @@ MAX_LABEL_CHARS = 120
 MAX_EXPIRES_HOURS = 24 * 365 * 10
 
 SHARE_RESPONSE_HEADERS: dict[str, str] = {
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'",
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
     "X-Robots-Tag": "noindex",
     "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
 }
 
 
