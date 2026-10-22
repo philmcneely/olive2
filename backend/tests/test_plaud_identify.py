@@ -351,3 +351,34 @@ async def test_enqueue_queues_plaud_sync_job(tmp_path: Path, monkeypatch: Any) -
     assert captured["label"] == "plaud-identify"
     assert captured["meeting_id"] == meeting_id
     handle.engine.dispose()
+
+
+def test_conversion_accepts_normalized_startms_segments() -> None:
+    """Stored ``plaud.json`` is often ``{startMs, endMs, speaker, text}`` (not raw Plaud keys).
+
+    Reading only ``start_time``/``end_time``/``content`` collapsed every such
+    segment to ``0..0`` and returned ``None`` — re-identification then
+    silently skipped the meeting.
+    """
+    transcript = plaud_segments_to_transcript(
+        [
+            {"startMs": 33820, "endMs": 84280, "speaker": "Speaker 1", "text": "Hi.", "verified": False, "words": []},
+            {"startMs": 84280, "endMs": 90000, "speaker": "Speaker 2", "text": "Yo.", "verified": False, "words": []},
+        ],
+        2224000,
+    )
+    assert transcript is not None
+    assert [(s.startMs, s.endMs, s.speaker, s.text) for s in transcript.segments] == [
+        (33820, 84280, "Speaker 1", "Hi."),
+        (84280, 90000, "Speaker 2", "Yo."),
+    ]
+
+
+def test_conversion_does_not_rescale_explicit_startms() -> None:
+    # Short, explicit-ms transcript inside a long recording must not hit the seconds heuristic.
+    transcript = plaud_segments_to_transcript(
+        [{"startMs": 1000, "endMs": 5000, "speaker": "A", "text": "Hi."}],
+        3_600_000,
+    )
+    assert transcript is not None
+    assert (transcript.segments[0].startMs, transcript.segments[0].endMs) == (1000, 5000)
