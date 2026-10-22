@@ -211,24 +211,35 @@ def plaud_segments_to_transcript(
     a seconds reading, values are scaled by 1000. Per-value heuristics are
     deliberately avoided so genuine sub-second millisecond timestamps survive.
 
+    ``transcripts/plaud.json`` on disk may instead hold the normalized
+    ``{startMs, endMs, speaker, text}`` shape (the same one
+    ``services.transcription._parse_stored_transcript`` accepts). Those keys
+    are explicit milliseconds, so they are read as-is and never rescaled;
+    reading only the raw Plaud keys collapsed every such segment to ``0..0``
+    and made re-identification silently skip the meeting.
+
     Segments without a speaker label become ``UU`` turns (skipped by the
     identifier); segments with unusable timings are dropped. Returns ``None``
     when nothing usable remains. Word timings are not required — the
     ASR-first identifier only needs segment turns.
     """
     parsed: list[tuple[float, float, str, str]] = []
+    explicit_ms = False
     for seg in segments or []:
         if not isinstance(seg, dict):
             continue
+        is_ms_shape = "startMs" in seg or "endMs" in seg
         try:
-            start = float(seg.get("start_time") or 0)
-            end = float(seg.get("end_time") or 0)
+            start = float((seg.get("startMs") if is_ms_shape else seg.get("start_time")) or 0)
+            end = float((seg.get("endMs") if is_ms_shape else seg.get("end_time")) or 0)
         except (TypeError, ValueError):
             continue
         if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
             continue
         speaker = str(seg.get("speaker") or "").strip() or UNKNOWN_PLAUD_SPEAKER
-        parsed.append((start, end, speaker, str(seg.get("content") or "")))
+        content = seg.get("text") if is_ms_shape else seg.get("content")
+        parsed.append((start, end, speaker, str(content or "")))
+        explicit_ms = explicit_ms or is_ms_shape
     if not parsed:
         return None
 
@@ -238,7 +249,13 @@ def plaud_segments_to_transcript(
     except (TypeError, ValueError):
         total_ms = 0.0
     max_end = max(end for _, end, _, _ in parsed)
-    if total_ms > 0 and max_end > 0 and max_end < total_ms * 0.1 and max_end * 1000.0 <= total_ms * 1.05:
+    if (
+        not explicit_ms
+        and total_ms > 0
+        and max_end > 0
+        and max_end < total_ms * 0.1
+        and max_end * 1000.0 <= total_ms * 1.05
+    ):
         scale = 1000.0
 
     return Transcript(
@@ -1559,7 +1576,12 @@ class PlaudPoller:
         duration_ms = recording.get("duration_ms") or (int(meeting["end_time"]) - int(meeting["start_time"]))
         transcript = plaud_segments_to_transcript(raw_segments, duration_ms)
         if transcript is None:
-            return skipped
+            reason = "plaud.json has no segments with usable timings"
+            self.logger.warn(
+                "Plaud speaker identification skipped; keeping Plaud labels",
+                {"category": "plaud", "meetingId": meeting_id, "reason": reason},
+            )
+            return {**skipped, "error": reason}
 
         enrolled = await self._get_enrolled_speakers_with_voiceprints()
         if not enrolled:
