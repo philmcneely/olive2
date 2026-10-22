@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import re
 import time
 import urllib.parse
@@ -421,9 +422,13 @@ class PlaudPoller:
             self._scheduler = None
         try:
             asyncio.get_running_loop().create_task(self.trigger())
-            # Boot backfill: already-ingested Plaud meetings predate speaker
-            # identification — queue them so new enrollments also apply.
-            self._spawn_background(self.backfill_plaud_speaker_identification())
+            # Boot backfill (OFF by default): already-ingested Plaud meetings predate
+            # speaker identification. A full-corpus sweep on every boot is an
+            # uncontrolled bulk re-ID (ambient recordings included), so it only runs
+            # when OLIVE_PLAUD_IDENTIFY_ON_BOOT is set. The scheduled poll and the
+            # explicit POST /api/meetings/{id}/speakers/reidentify are unaffected.
+            if os.getenv("OLIVE_PLAUD_IDENTIFY_ON_BOOT", "").strip().lower() in ("1", "true", "yes", "on"):
+                self._spawn_background(self.backfill_plaud_speaker_identification())
         except RuntimeError:
             pass
 
