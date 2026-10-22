@@ -202,6 +202,57 @@ def test_host_check_on_rejects_unknown_host_and_allows_listed(
     assert client.get("/api/config", headers={"Host": "rebind.evil.example"}).status_code == 200
 
 
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+def test_host_check_on_covers_reads_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str) -> None:
+    monkeypatch.setenv("OLIVE_ALLOWED_HOSTS", "olive.lan")
+    client = make_client(tmp_path, bindHost="10.0.0.9", mcpToken="t")
+    for path in ("/api/config", "/api/meetings", "/mcp", "/some/spa/route"):
+        bad = client.request(method, path, headers={"Host": "rebind.evil.example"})
+        assert bad.status_code == 403, (method, path)
+        if method == "GET":
+            assert HOST_MSG in bad.text
+
+
+def test_host_check_on_allows_good_hosts_for_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLIVE_ALLOWED_HOSTS", "olive.lan")
+    client = make_client(tmp_path, bindHost="10.0.0.9", mcpToken="t")
+    for host in ("olive.lan", "olive.lan:4471", "localhost:4471", "127.0.0.1", "[::1]:4471", "10.0.0.9:80"):
+        assert client.get("/api/config", headers={"Host": host}).status_code == 200, host
+
+
+def test_host_check_off_reads_allow_any_host(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    for host in ("rebind.evil.example", "192.168.0.9:4471", "anything"):
+        assert client.get("/api/config", headers={"Host": host}).status_code == 200
+        assert client.get("/api/meetings", headers={"Host": host}).status_code == 200
+
+
+def test_origin_check_stays_mutation_only_with_host_check_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OLIVE_ALLOWED_HOSTS", "olive.lan")
+    client = make_client(tmp_path)
+    hdr = {"Host": "olive.lan", "Origin": "https://evil.example"}
+    assert client.get("/api/config", headers=hdr).status_code == 200  # reads are not origin-checked
+    assert blocked(client.delete("/api/logs", headers=hdr))
+
+
+def test_startup_warns_when_non_loopback_without_allowed_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="olive.security"):
+        make_client(tmp_path, bindHost="10.0.0.9", mcpToken="t")
+    assert any(
+        "OLIVE_ALLOWED_HOSTS" in r.getMessage() and "DNS-rebinding" in r.getMessage() for r in caplog.records
+    )
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="olive.security"):
+        make_client(tmp_path)  # loopback: quiet
+        monkeypatch.setenv("OLIVE_ALLOWED_HOSTS", "olive.lan")
+        make_client(tmp_path, bindHost="10.0.0.9", mcpToken="t")  # protected: quiet
+    assert not caplog.records
+
+
 # -- FIX A: env-controlled share flag is never persisted by a settings save ------------------------
 
 
