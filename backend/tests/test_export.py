@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from export_support import CANONICAL, T0, seed_meeting
 
+from export_support import CANONICAL, T0, seed_meeting
 from olive.db import create_db
 from olive.schemas import TranscriptSegment
 from olive.services import export
@@ -77,7 +77,11 @@ def test_srt_basic_shape() -> None:
 
 
 def test_srt_round_trips_through_parser() -> None:
-    segs = [seg(0, 3000, "Alice", "Hello."), seg(4000, 6000, "Bob", "Hi there."), seg(7000, 8000, "Alice", "Bye.")]
+    segs = [
+        seg(0, 3000, "Alice", "Hello."),
+        seg(4000, 6000, "Bob", "Hi there."),
+        seg(7000, 8000, "Alice", "Bye."),
+    ]
     parsed = parse_srt(export.to_srt(make_doc(segs))).transcript.segments
     assert [(s.speaker, s.text, s.startMs, s.endMs) for s in parsed] == [
         ("Alice", "Hello.", 0, 3000),
