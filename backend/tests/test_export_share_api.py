@@ -501,3 +501,21 @@ def test_share_routes_survive_render_bugs_without_leaking_token(
     assert page.status_code == 500
     _assert_share_headers(page)
     assert token not in page.text and token not in caplog.text
+
+
+# -- /api/config reports the effective flag --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("env_value", "stored", "expected"),
+    [("1", False, True), (None, False, False), (None, True, True), ("0", True, False)],
+)
+def test_api_config_reports_effective_share_flag(
+    env: Env, monkeypatch: pytest.MonkeyPatch, env_value: str | None, stored: bool, expected: bool
+) -> None:
+    env.set_config(shareLinksEnabled=stored)
+    if env_value is not None:
+        monkeypatch.setenv("OLIVE_SHARE_ENABLED", env_value)
+    assert env.client.get("/api/config").json()["shareLinksEnabled"] is expected
+    # the stored setting itself is untouched
+    assert load_app_config(env.paths).shareLinksEnabled is stored
