@@ -12,6 +12,7 @@ every section newer than the previous tag into the GitHub release notes.
 
 ### Added
 
+- **Export & Share (backend)** — export any meeting's transcript as TXT, Markdown, SRT, VTT, PDF or DOCX, optionally with the summary and timestamps. Optional read-only share links (off by default; enable with the `shareLinksEnabled` setting or `OLIVE_SHARE_ENABLED=1`) give a revocable, expiring page with download buttons, never the audio. Links are stored hashed, expire after `shareDefaultTtlHours` (7 days by default), and a link is not an access control on a server that is otherwise open to your network.
 - **Insight Groups** — build your own named sets of meetings and analyze them as a unit. A meeting can belong to many groups, groups grow over time, and each group tracks its trend per axis as snapshots. The Insights tab gains a scope dropdown (analyze All meetings or a single group) and a multi-group comparison against the default scope.
 
 ### Changed
