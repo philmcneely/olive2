@@ -111,16 +111,32 @@ TRANSCRIPT
 END TRANSCRIPT
 
 Task: for EACH speaker label listed above, decide whether the transcript itself reveals the real \
-name of the person behind that label. Good evidence is another speaker addressing that person by \
-name and that person replying, the person introducing themselves, or someone else introducing \
-them. A name that is only mentioned in passing, or that belongs to a third party being talked \
-about, is not evidence. Propose a name only when it is supported; otherwise give null. Prefer a \
-spelling from the known people when one matches, and otherwise use the name exactly as it is \
-spoken. The quote must be copied exactly from the cited turn and must contain the name.
+name of the person behind that label. There are exactly two kinds of valid evidence, and the \
+direction matters — it decides WHICH speaker the name belongs to:
+
+1. SELF-INTRODUCTION ("evidenceType": "self"): the speaker states their OWN name — "I'm Morgan", \
+"this is Morgan", "Morgan here", "my name is Morgan". People only say their own name when \
+introducing themselves, so this is the strongest evidence. The name belongs to the speaker of \
+that turn. Cite that same speaker's turn.
+
+2. BEING ADDRESSED ("evidenceType": "addressed"): ANOTHER speaker addresses this person by name — \
+"Hey Bill", "thanks, Justin", "you covered a lot, Guillaume", "Phil, did you have anything else?" \
+— in the turn right before or after this person speaks. The name belongs to the person being \
+ADDRESSED (the one who speaks next to that turn), NOT to the speaker who said the name. Cite the \
+addressing speaker's turn.
+
+Critical: a speaker SAYING a name is almost always talking TO or ABOUT someone else. Never label a \
+speaker with a name just because that name appears in their own words — "Hey Bill" said by \
+Speaker 1 means the OTHER speaker is Bill, not Speaker 1. A name mentioned about an absent third \
+party is not evidence at all. Propose a name only when one of the two patterns above clearly \
+supports it; otherwise give null. Prefer a spelling from the known people when one matches, \
+otherwise use the name exactly as spoken. The quote must be copied exactly from the cited turn \
+and must contain the name.
 
 Reply with exactly one JSON object shaped like this, with one entry per label, and nothing else:
 {"proposals": [{"speaker": "Speaker 1", "proposedName": "Name or null", "confidence": 0.0, \
-"evidenceQuote": "verbatim words containing the name", "evidenceTurnIdx": 0}]}"""
+"evidenceType": "self or addressed", "evidenceQuote": "verbatim words containing the name", \
+"evidenceTurnIdx": 0}]}"""
 
 DEFAULT_PROMPTS: dict[str, str] = {
     "systemPrompt": SYSTEM_PROMPT,

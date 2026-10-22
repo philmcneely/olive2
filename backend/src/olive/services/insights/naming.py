@@ -75,8 +75,17 @@ class ProposedName(CamelModel):
     speaker: str
     proposedName: str | None = None
     confidence: float | None = None
+    evidenceType: str | None = None
     evidenceQuote: str | None = None
     evidenceTurnIdx: int | None = None
+
+    @field_validator("evidenceType", mode="before")
+    @classmethod
+    def _norm_evidence_type(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return None
+        v = value.strip().lower()
+        return v if v in {"self", "addressed"} else None
 
     @field_validator("proposedName", mode="before")
     @classmethod
@@ -167,6 +176,8 @@ def ground_name(
     item: ProposedName,
     segments: Sequence[TranscriptSegment],
     known: Mapping[str, str],
+    *,
+    speaker_count: int | None = None,
 ) -> tuple[str | None, str | None, bool]:
     """Verify one proposal; return ``(canonical_name, evidence_quote, grounded)``.
 
@@ -187,6 +198,34 @@ def ground_name(
         return name, quote, False
     norm_name = normalize_text(name)
     if not _contains_phrase(norm_quote, norm_name):
+        return name, quote, False
+    # Directionality: who does the name belong to? A speaker only reveals their OWN
+    # name by introducing themselves; a name they say TO someone else belongs to that
+    # listener, not to them. So the cited turn's speaker, relative to the speaker being
+    # named, must match the claimed evidence type:
+    #   self      -> the name is in the named speaker's OWN turn (self-introduction)
+    #   addressed -> the name is in a DIFFERENT speaker's turn, and the meeting has
+    #                exactly two speakers, so the addressee is unambiguously the other
+    #                one (the named speaker). With 3+ speakers we cannot tell who was
+    #                addressed, so an addressed vocative is not grounded.
+    # Anything else (e.g. a speaker uttering a name mid-turn) is not grounded.
+    cited_speaker = normalize_text(segments[idx].speaker or "")
+    named_speaker = normalize_text(item.speaker or "")
+    etype = item.evidenceType
+    if etype == "self":
+        # A self-introduction is spoken by the person themselves, in their own turn.
+        if not cited_speaker or cited_speaker != named_speaker:
+            return name, quote, False
+    elif etype == "addressed":
+        # A vocative names the person being addressed, never the one who said it.
+        if cited_speaker == named_speaker:
+            return name, quote, False
+        # It only resolves unambiguously in a two-person conversation: the addressee
+        # is the other speaker. With three or more speakers we cannot tell who was
+        # addressed, so we refuse to guess (self-introductions still work).
+        if speaker_count != 2:
+            return name, quote, False
+    else:
         return name, quote, False
     return known.get(normalize_alias(name), name), quote, True
 
@@ -406,7 +445,9 @@ class SpeakerNamingService(InsightsService):
                 label = target_by_norm.get(normalize_alias(item.speaker))
                 if label is None:
                     continue  # the model named a label we did not ask about
-                name, quote, grounded = ground_name(item, segments, known)
+                name, quote, grounded = ground_name(
+                    item, segments, known, speaker_count=len(labels)
+                )
                 if not name:
                     status = STATUS_NONE
                 else:
@@ -417,6 +458,7 @@ class SpeakerNamingService(InsightsService):
                     "conf": item.confidence if status != STATUS_NONE else None,
                     "quote": quote if status != STATUS_NONE else None,
                     "turn": item.evidenceTurnIdx if status != STATUS_NONE else None,
+                    "etype": item.evidenceType if status != STATUS_NONE else None,
                     "status": status,
                 }
                 current = best.get(label)
@@ -436,6 +478,7 @@ class SpeakerNamingService(InsightsService):
                     "conf": None,
                     "quote": None,
                     "turn": None,
+                    "etype": None,
                     "status": STATUS_NONE,
                 },
             )
@@ -448,15 +491,16 @@ class SpeakerNamingService(InsightsService):
                         """
                         INSERT INTO meeting_speaker_name_proposals (
                           id, meeting_id, speaker_label, proposed_name, confidence, evidence_quote,
-                          evidence_turn_idx, status, model, provider, created_at
+                          evidence_turn_idx, evidence_type, status, model, provider, created_at
                         ) VALUES (
-                          :id, :mid, :label, :name, :conf, :quote, :turn, :status, :model, :provider, :now
+                          :id, :mid, :label, :name, :conf, :quote, :turn, :etype, :status, :model, :provider, :now
                         )
                         ON CONFLICT(meeting_id, speaker_label) DO UPDATE SET
                           proposed_name = excluded.proposed_name,
                           confidence = excluded.confidence,
                           evidence_quote = excluded.evidence_quote,
                           evidence_turn_idx = excluded.evidence_turn_idx,
+                          evidence_type = excluded.evidence_type,
                           status = excluded.status,
                           model = excluded.model,
                           provider = excluded.provider,
@@ -509,7 +553,7 @@ class SpeakerNamingService(InsightsService):
                     text(
                         """
                         SELECT speaker_label, proposed_name, confidence, evidence_quote,
-                               evidence_turn_idx, status, model, provider
+                               evidence_turn_idx, evidence_type, status, model, provider
                         FROM meeting_speaker_name_proposals
                         WHERE meeting_id = :mid
                         ORDER BY speaker_label

@@ -198,6 +198,7 @@ CREATE_TABLE_STATEMENTS: list[str] = [
     confidence REAL,
     evidence_quote TEXT,
     evidence_turn_idx INTEGER,
+    evidence_type TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     model TEXT,
     provider TEXT,
@@ -277,6 +278,7 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("plaud_ingest_state", "duplicate_of_meeting_id", "TEXT REFERENCES meetings(id)"),
     ("meeting_speakers", "identity_source", "TEXT"),
     ("meeting_speakers", "identity_confidence", "REAL"),
+    ("meeting_speaker_name_proposals", "evidence_type", "TEXT"),
 ]
 
 DEFAULT_TEMPLATES: list[dict[str, Any]] = [

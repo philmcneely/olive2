@@ -31,18 +31,24 @@ from olive.services.meetings import delete_meeting
 PROXY_HOST = "llm-proxy.local:3020"
 PROXY_URL = f"http://{PROXY_HOST}/v1"
 
-# Turn 1 addresses "Speaker 2" as Vineet; turn 4 addresses "Speaker 1" as Dana; turn 5 mentions a
-# third party (Zed) who is not at the meeting.
+# Speaker 1 introduces herself as Dana (turn 0); Speaker 2 introduces himself as Vineet (turn 1);
+# Speaker 3 never gives a name. Self-introductions are the reliable signal and work regardless of
+# how many speakers are present. Turn 4 mentions a third party (Zed) who is not at the meeting.
 SEGMENTS = [
     {
         "startMs": 0,
         "endMs": 4000,
         "speaker": "Speaker 1",
-        "text": "Okay, let's start. Vineet, what is the status?",
+        "text": "Okay, let's start. I'm Dana and I'll facilitate today.",
     },
-    {"startMs": 4200, "endMs": 9000, "speaker": "Speaker 2", "text": "We shipped the beta last week."},
-    {"startMs": 9200, "endMs": 12000, "speaker": "Speaker 1", "text": "Great, thanks."},
-    {"startMs": 12200, "endMs": 15000, "speaker": "Speaker 2", "text": "Dana, can you review the budget?"},
+    {
+        "startMs": 4200,
+        "endMs": 9000,
+        "speaker": "Speaker 2",
+        "text": "Thanks. This is Vineet, we shipped the beta last week.",
+    },
+    {"startMs": 9200, "endMs": 12000, "speaker": "Speaker 1", "text": "Great, appreciate it."},
+    {"startMs": 12200, "endMs": 15000, "speaker": "Speaker 2", "text": "Could someone review the budget?"},
     {"startMs": 15200, "endMs": 18000, "speaker": "Speaker 1", "text": "Sure. Zed asked about it too."},
     {"startMs": 18200, "endMs": 20000, "speaker": "Speaker 3", "text": "I have nothing to add."},
 ]
@@ -53,20 +59,26 @@ def _reply(*items: dict[str, Any]) -> str:
 
 
 def _item(
-    speaker: str, name: str | None, quote: str | None, turn: int | None, confidence: float = 0.9
+    speaker: str,
+    name: str | None,
+    quote: str | None,
+    turn: int | None,
+    confidence: float = 0.9,
+    evidence_type: str = "addressed",
 ) -> dict[str, Any]:
     return {
         "speaker": speaker,
         "proposedName": name,
         "confidence": confidence,
+        "evidenceType": evidence_type,
         "evidenceQuote": quote,
         "evidenceTurnIdx": turn,
     }
 
 
 GOOD_REPLY = _reply(
-    _item("Speaker 2", "Vineet", "Vineet, what is the status?", 0, 0.92),
-    _item("Speaker 1", "Dana", "Dana, can you review the budget?", 3, 0.85),
+    _item("Speaker 2", "Vineet", "This is Vineet, we shipped the beta last week.", 1, 0.92, "self"),
+    _item("Speaker 1", "Dana", "I'm Dana and I'll facilitate today.", 0, 0.85, "self"),
     _item("Speaker 3", None, None, None, 0.0),
 )
 
@@ -200,11 +212,12 @@ async def test_propose_stores_pending_proposals_with_confidence_and_evidence(tmp
     assert vineet["proposed_name"] == "Vineet"
     assert vineet["status"] == "pending"
     assert vineet["confidence"] == pytest.approx(0.92)
-    assert vineet["evidence_quote"] == "Vineet, what is the status?"
-    assert vineet["evidence_turn_idx"] == 0
+    assert vineet["evidence_quote"] == "This is Vineet, we shipped the beta last week."
+    assert vineet["evidence_turn_idx"] == 1
+    assert vineet["evidence_type"] == "self"
     assert vineet["model"] == "default-model" and vineet["provider"] == "openai"
     assert stored["Speaker 1"]["proposed_name"] == "Dana"
-    assert stored["Speaker 1"]["evidence_turn_idx"] == 3
+    assert stored["Speaker 1"]["evidence_turn_idx"] == 0
     assert res["counts"] == {"pending": 2, "none": 1, "ungrounded": 0}
     # The prompt cites turns and asks only about generic labels.
     prompt = llm.calls[0]["prompt"]
@@ -213,7 +226,7 @@ async def test_propose_stores_pending_proposals_with_confidence_and_evidence(tmp
 
 
 async def test_known_speakers_are_offered_as_candidates_and_canonicalized(tmp_path: Path) -> None:
-    reply = _reply(_item("Speaker 2", "vineet", "Vineet, what is the status?", 0))
+    reply = _reply(_item("Speaker 2", "vineet", "This is Vineet, we shipped the beta last week.", 1, 0.9, "self"))
     handle, meetings_dir, llm, service = _make_service(tmp_path, reply)
     mid = _seed(handle.engine, meetings_dir)
     _add_speaker(handle.engine, "spk-v", "Vineet Rao")
@@ -234,8 +247,8 @@ async def test_known_speakers_are_offered_as_candidates_and_canonicalized(tmp_pa
 
 async def test_non_verbatim_evidence_quote_is_flagged_not_offered(tmp_path: Path) -> None:
     reply = _reply(
-        _item("Speaker 2", "Vineet", "Vineet, please give us the status report", 0),  # paraphrase
-        _item("Speaker 1", "Dana", "Dana, can you review the budget?", 3),
+        _item("Speaker 2", "Vineet", "Vineet will give the status report", 1, 0.9, "self"),  # paraphrase
+        _item("Speaker 1", "Dana", "I'm Dana and I'll facilitate today.", 0, 0.9, "self"),
     )
     handle, meetings_dir, _llm, service = _make_service(tmp_path, reply)
     mid = _seed(handle.engine, meetings_dir)
@@ -293,19 +306,71 @@ async def test_name_neither_known_nor_spoken_is_never_proposed(tmp_path: Path) -
 def test_ground_name_accepts_only_whole_word_names_in_the_quote() -> None:
     from olive.schemas import TranscriptSegment
 
-    segs = [TranscriptSegment(startMs=0, endMs=1, speaker="Speaker 1", text="Thanks Alexander, that helps.")]
+    # Speaker 1 addresses Alexander; Speaker 2 (the addressed speaker) replies next.
+    segs = [
+        TranscriptSegment(startMs=0, endMs=1, speaker="Speaker 1", text="Thanks Alexander, that helps."),
+        TranscriptSegment(startMs=1, endMs=2, speaker="Speaker 2", text="Happy to help."),
+    ]
     ok = ProposedName(
-        speaker="Speaker 2", proposedName="Alexander", evidenceQuote="thanks alexander", evidenceTurnIdx=0
+        speaker="Speaker 2", proposedName="Alexander", evidenceType="addressed",
+        evidenceQuote="thanks alexander", evidenceTurnIdx=0,
     )
-    assert ground_name(ok, segs, {"alexander": "Alexander"})[2] is True
+    assert ground_name(ok, segs, {"alexander": "Alexander"}, speaker_count=2)[2] is True
     partial = ProposedName(
-        speaker="Speaker 2", proposedName="Alex", evidenceQuote="Thanks Alexander", evidenceTurnIdx=0
+        speaker="Speaker 2", proposedName="Alex", evidenceType="addressed",
+        evidenceQuote="Thanks Alexander", evidenceTurnIdx=0,
     )
-    assert ground_name(partial, segs, {})[2] is False
+    assert ground_name(partial, segs, {}, speaker_count=2)[2] is False
     generic = ProposedName(
-        speaker="Speaker 2", proposedName="Speaker 4", evidenceQuote="Thanks", evidenceTurnIdx=0
+        speaker="Speaker 2", proposedName="Speaker 4", evidenceType="addressed",
+        evidenceQuote="Thanks", evidenceTurnIdx=0,
     )
-    assert ground_name(generic, segs, {})[2] is False
+    assert ground_name(generic, segs, {}, speaker_count=2)[2] is False
+
+
+def test_ground_name_direction_self_vs_addressed() -> None:
+    from olive.schemas import TranscriptSegment
+
+    # Two-speaker conversation: Speaker 1 greets Bill, Speaker 2 replies.
+    two = [
+        TranscriptSegment(startMs=0, endMs=1, speaker="Speaker 1", text="Hey Bill, how's it going?"),
+        TranscriptSegment(startMs=1, endMs=2, speaker="Speaker 2", text="Good, thanks for having me."),
+    ]
+    # A speaker uttering a vocative is NOT that name: Speaker 1 saying "Hey Bill" is not Bill.
+    utterer_is_name = ProposedName(
+        speaker="Speaker 1", proposedName="Bill", evidenceType="addressed",
+        evidenceQuote="hey bill", evidenceTurnIdx=0,
+    )
+    assert ground_name(utterer_is_name, two, {}, speaker_count=2)[2] is False
+    # With exactly two speakers, the addressee is the other speaker: Speaker 2 is Bill.
+    addressed_two = ProposedName(
+        speaker="Speaker 2", proposedName="Bill", evidenceType="addressed",
+        evidenceQuote="hey bill", evidenceTurnIdx=0,
+    )
+    assert ground_name(addressed_two, two, {}, speaker_count=2)[2] is True
+
+    # Three-speaker meeting: who is addressed is ambiguous, so address evidence is refused.
+    three = [
+        TranscriptSegment(startMs=0, endMs=1, speaker="Speaker 1", text="You covered a lot, Guillaume."),
+        TranscriptSegment(startMs=1, endMs=2, speaker="Speaker 2", text="Agreed."),
+        TranscriptSegment(startMs=2, endMs=3, speaker="Speaker 3", text="This is Morgan, glad to join."),
+    ]
+    addressed_three = ProposedName(
+        speaker="Speaker 2", proposedName="Guillaume", evidenceType="addressed",
+        evidenceQuote="you covered a lot, guillaume", evidenceTurnIdx=0,
+    )
+    assert ground_name(addressed_three, three, {}, speaker_count=3)[2] is False
+    # Self-introduction is reliable at any speaker count.
+    self_intro = ProposedName(
+        speaker="Speaker 3", proposedName="Morgan", evidenceType="self",
+        evidenceQuote="this is morgan", evidenceTurnIdx=2,
+    )
+    assert ground_name(self_intro, three, {}, speaker_count=3)[2] is True
+    # Missing/invalid evidence type is never grounded.
+    no_type = ProposedName(
+        speaker="Speaker 2", proposedName="Bill", evidenceQuote="hey bill", evidenceTurnIdx=0,
+    )
+    assert ground_name(no_type, two, {}, speaker_count=2)[2] is False
 
 
 async def test_generic_label_without_support_stays_unproposed(tmp_path: Path) -> None:
@@ -714,7 +779,7 @@ def test_migration_adds_proposals_table_idempotently_with_indexes() -> None:
     assert "meeting_speaker_name_proposals" in tables
     assert set(cols) == {
         "id", "meeting_id", "speaker_label", "proposed_name", "confidence", "evidence_quote",
-        "evidence_turn_idx", "status", "model", "provider", "created_at",
+        "evidence_turn_idx", "evidence_type", "status", "model", "provider", "created_at",
     }  # fmt: skip
     assert "UNIQUE" in indexes["idx_name_proposals_label"].upper()
     assert "idx_name_proposals_meeting" in indexes
@@ -800,3 +865,15 @@ def test_naming_uses_public_census_helpers_and_shared_prompt_defaults() -> None:
         "namingSystemPrompt": DEFAULT_PROMPTS["namingSystemPrompt"],
         "namingPrompt": DEFAULT_PROMPTS["namingPrompt"],
     }
+
+
+async def test_evidence_type_is_persisted_for_grounded_proposals(tmp_path: Path) -> None:
+    handle, meetings_dir, _llm, service = _make_service(tmp_path)
+    mid = _seed(handle.engine, meetings_dir)
+    await service.propose_names(mid)
+    props = _proposals(handle.engine)
+    # Both GOOD_REPLY names come from self-introductions; the type is recorded so the UI can
+    # flag vocative (addressed) guesses as "uncertain" versus confident self-introductions.
+    assert props["Speaker 2"]["status"] == "pending"
+    assert props["Speaker 2"]["evidence_type"] == "self"
+    assert props["Speaker 1"]["evidence_type"] == "self"
