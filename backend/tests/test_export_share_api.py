@@ -263,6 +263,8 @@ def _assert_share_headers(res) -> None:
     assert h["referrer-policy"] == "no-referrer"
     assert h["x-robots-tag"] == "noindex"
     assert h["x-content-type-options"] == "nosniff"
+    assert "form-action 'none'" in csp
+    assert h["cross-origin-resource-policy"] == "same-origin"
 
 
 def test_public_page_content_and_headers(env: Env) -> None:
@@ -310,7 +312,10 @@ def test_public_download_formats_and_audio_never_exposed(env: Env) -> None:
     docx = env.client.get(f"/share/{token}/download?format=docx")
     assert zipfile.ZipFile(io.BytesIO(docx.content)).testzip() is None
     assert b"Hello team." in env.client.get(f"/share/{token}/download?format=srt").content
-    assert env.client.get(f"/share/{token}/download?format=exe").status_code == 400
+    bad_fmt = env.client.get(f"/share/{token}/download?format=exe")
+    assert bad_fmt.status_code == 404  # uniform 404, not a distinguishable 400
+    assert bad_fmt.text == env.client.get(f"/share/{'A' * 43}/download?format=pdf").text
+    _assert_share_headers(bad_fmt)
     assert env.client.get(f"/share/{token}/download").status_code == 200  # default txt
     for audio_path in ("audio", "recording", "recordings/r1"):
         assert env.client.get(f"/share/{token}/{audio_path}").status_code == 404
@@ -430,3 +435,69 @@ def test_e2e_share_lifecycle(env: Env) -> None:
     assert env.client.get(f"/share/{token3}").status_code == 404
     # export is NOT gated by the flag
     assert env.client.get("/api/meetings/m1/export?format=txt").status_code == 200
+
+
+# -- hardening: size cap, render failures, bad format ---------------------------------------------
+
+
+def _big_transcript(n: int) -> dict:
+    return {
+        "segments": [
+            {"startMs": i * 10, "endMs": i * 10 + 5, "speaker": f"S{i % 2}", "text": "word"} for i in range(n)
+        ]
+    }
+
+
+def test_export_over_cap_is_413_for_heavy_formats(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    from olive.services import export
+
+    env.seed(transcript=_big_transcript(40))
+    monkeypatch.setattr(export, "MAX_EXPORT_SEGMENTS", 30)
+    assert env.client.get("/api/meetings/m1/export?format=pdf").status_code == 413
+    assert env.client.get("/api/meetings/m1/export?format=docx").status_code == 413
+    monkeypatch.setattr(export, "MAX_EXPORT_SEGMENTS", 40)  # at the cap still works
+    assert env.client.get("/api/meetings/m1/export?format=pdf").status_code == 200
+    monkeypatch.setattr(export, "MAX_EXPORT_TEXT_BYTES", 100)
+    assert env.client.get("/api/meetings/m1/export?format=docx").status_code == 413
+    assert env.client.get("/api/meetings/m1/export?format=txt").status_code == 200  # cheap formats unaffected
+
+
+def test_public_download_over_cap_is_413_with_headers(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    from olive.services import export
+
+    env.seed(transcript=_big_transcript(40))
+    env.enable()
+    token = _token_from(env.share())
+    monkeypatch.setattr(export, "MAX_EXPORT_SEGMENTS", 30)
+    res = env.client.get(f"/share/{token}/download?format=pdf")
+    assert res.status_code == 413
+    _assert_share_headers(res)
+    assert env.client.get(f"/share/{token}/download?format=txt").status_code == 200
+
+
+def test_share_routes_survive_render_bugs_without_leaking_token(
+    env: Env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from olive.services import export
+    from olive.services.sharing import ShareService
+
+    env.seed()
+    env.enable()
+    token = _token_from(env.share())
+
+    def boom(*_a, **_k):
+        raise RuntimeError("renderer exploded")
+
+    monkeypatch.setattr(export, "to_pdf", boom)
+    with caplog.at_level("ERROR"):
+        res = env.client.get(f"/share/{token}/download?format=pdf")
+    assert res.status_code == 500
+    _assert_share_headers(res)
+    assert token not in res.text and token not in caplog.text
+
+    monkeypatch.setattr(ShareService, "public_view", boom)
+    with caplog.at_level("ERROR"):
+        page = env.client.get(f"/share/{token}")
+    assert page.status_code == 500
+    _assert_share_headers(page)
+    assert token not in page.text and token not in caplog.text

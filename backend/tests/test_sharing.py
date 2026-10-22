@@ -294,6 +294,8 @@ def test_response_headers_policy() -> None:
     assert h["referrer-policy"] == "no-referrer"
     assert h["x-robots-tag"] == "noindex"
     assert h["x-content-type-options"] == "nosniff"
+    assert "form-action 'none'" in csp
+    assert h["cross-origin-resource-policy"] == "same-origin"
 
 
 # -- feature flag ----------------------------------------------------------------------------

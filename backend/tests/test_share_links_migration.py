@@ -123,6 +123,10 @@ def test_settings_defaults_and_validation() -> None:
     assert AppConfig(shareDefaultTtlHours=0).shareDefaultTtlHours == 0
     with pytest.raises(ValidationError):
         AppConfig(shareDefaultTtlHours=-1)
+    assert AppConfig(shareDefaultTtlHours=87600).shareDefaultTtlHours == 87600  # 10 years
+    with pytest.raises(ValidationError):
+        AppConfig(shareDefaultTtlHours=87601)
+    assert "never" in (AppConfig.model_fields["shareDefaultTtlHours"].description or "").lower()
 
 
 def test_settings_reach_frontend_and_persist(tmp_path: Path) -> None:
