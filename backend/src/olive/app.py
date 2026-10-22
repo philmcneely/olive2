@@ -659,6 +659,12 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
 
     app = FastAPI(title="Olive API", version=__version__, lifespan=lifespan)
 
+    # Compress text responses (JS/CSS/JSON). The SPA bundle is ~1 MB uncompressed;
+    # gzip takes it to ~250 KB, which dominates first-load time on the LAN.
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:
         from .mcp_server import handle_mcp_request
@@ -3182,6 +3188,15 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             if candidate and candidate.is_file():
                 if candidate.name == "index.html":
                     return FileResponse(candidate, headers=no_cache_headers)
+                # Vite emits content-hashed asset names (e.g. index-ABC123.js), so
+                # they are safe to cache forever — a new build changes the name.
+                # Anchor on the assets/ prefix: a non-hashed file elsewhere must not
+                # inherit a one-year immutable cache and go stale after a deploy.
+                if full_path.startswith("assets/"):
+                    return FileResponse(
+                        candidate,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+                    )
                 return FileResponse(candidate)
             index_path = Path(str(web_root)) / "index.html"
             if index_path.is_file():
