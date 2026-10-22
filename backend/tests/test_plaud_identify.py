@@ -382,3 +382,18 @@ def test_conversion_does_not_rescale_explicit_startms() -> None:
     )
     assert transcript is not None
     assert (transcript.segments[0].startMs, transcript.segments[0].endMs) == (1000, 5000)
+
+
+def test_embedder_logs_loudly_when_embedding_fails(monkeypatch) -> None:
+    """A swallowed embed failure must be logged (still returning the zero vector)."""
+    import numpy as np
+
+    from olive.ml import embed as embed_mod
+
+    errors: list[tuple[str, dict]] = []
+    monkeypatch.setattr(embed_mod.logger, "error", lambda msg, ctx=None: errors.append((msg, ctx or {})))
+    ext = embed_mod.WeSpeakerEmbeddingExtractor()
+    monkeypatch.setattr(ext, "_ensure_session_sync", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    vec = ext._extract_sync(np.zeros(16000, dtype="float32"), 16000)
+    assert not any(vec)
+    assert errors and "boom" in errors[0][1]["error"]
