@@ -76,6 +76,8 @@ class MeetingSpeakerModel(Base):
     meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), primary_key=True)
     speaker_id: Mapped[str] = mapped_column(Text, ForeignKey("speakers.id"), primary_key=True)
     evidence_artifact_id: Mapped[str | None] = mapped_column(Text, ForeignKey("artifacts.id"), nullable=True)
+    identity_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class StageRunModel(Base):
@@ -178,6 +180,143 @@ class UsageEventModel(Base):
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class MeetingSpeakerSignalModel(Base):
+    """Per-meeting, per-speaker behavioral signals (Olive Insights)."""
+
+    __tablename__ = "meeting_speaker_signals"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    speaker_id: Mapped[str | None] = mapped_column(Text, ForeignKey("speakers.id"), nullable=True)
+    speaker_label: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dimensions: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    talk_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    interrupt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    stance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_artifact_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class MeetingMomentModel(Base):
+    """A quoted, timestamped interaction moment within a meeting (Olive Insights)."""
+
+    __tablename__ = "meeting_moments"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    speaker_id: Mapped[str | None] = mapped_column(Text, ForeignKey("speakers.id"), nullable=True)
+    speaker_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    toward_speaker_id: Mapped[str | None] = mapped_column(Text, ForeignKey("speakers.id"), nullable=True)
+    toward_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    turn_start_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    turn_end_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    valence: Mapped[str] = mapped_column(Text, nullable=False)
+    framework: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dimension: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guidance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    identity_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    transcript_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class TranscriptImportModel(Base):
+    """Dedupe record for an imported transcript, keyed by content SHA-256."""
+
+    __tablename__ = "transcript_imports"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    source_format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subtype: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SpeakerAliasModel(Base):
+    """Normalized alias (nickname, handle, label) mapped to a speaker."""
+
+    __tablename__ = "speaker_aliases"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    alias_norm: Mapped[str] = mapped_column(Text, nullable=False)
+    speaker_id: Mapped[str | None] = mapped_column(Text, ForeignKey("speakers.id"), nullable=True)
+    kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirmed: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class MeetingSpeakerNameProposalModel(Base):
+    """A proposed real name for a generic speaker label, awaiting confirmation (Olive Insights)."""
+
+    __tablename__ = "meeting_speaker_name_proposals"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    speaker_label: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_turn_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InsightGroupModel(Base):
+    """A user-named group of meetings analysed together (Insight Groups)."""
+
+    __tablename__ = "insight_groups"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    axes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InsightGroupMemberModel(Base):
+    """Membership of a meeting in a group; a meeting may belong to many groups."""
+
+    __tablename__ = "insight_group_members"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    group_id: Mapped[str] = mapped_column(Text, ForeignKey("insight_groups.id"), nullable=False)
+    meeting_id: Mapped[str] = mapped_column(Text, ForeignKey("meetings.id"), nullable=False)
+    added_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InsightGroupSnapshotModel(Base):
+    """Aggregated axis scores of a group at a point in time (historical trend)."""
+
+    __tablename__ = "insight_group_snapshots"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    group_id: Mapped[str] = mapped_column(Text, ForeignKey("insight_groups.id"), nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    axes: Mapped[str] = mapped_column(Text, nullable=False)
+    meeting_ids: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 Index("idx_meetings_start_time", MeetingModel.start_time.desc())
 Index("idx_recordings_meeting", RecordingModel.meeting_id)
 Index(
@@ -197,20 +336,51 @@ Index("idx_logs_meeting_id", LogModel.meeting_id)
 Index("idx_chat_messages_meeting_created", ChatMessageModel.meeting_id, ChatMessageModel.created_at)
 Index("idx_usage_events_created", UsageEventModel.created_at.desc())
 Index("idx_usage_events_meeting", UsageEventModel.meeting_id)
+Index("idx_signals_meeting", MeetingSpeakerSignalModel.meeting_id)
+Index("idx_signals_speaker", MeetingSpeakerSignalModel.speaker_id)
+Index("idx_moments_meeting", MeetingMomentModel.meeting_id)
+Index("idx_moments_speaker", MeetingMomentModel.speaker_id, MeetingMomentModel.start_ms)
+Index("idx_moments_event", MeetingMomentModel.event_type)
+Index("idx_moments_start", MeetingMomentModel.start_ms)
+Index("idx_speaker_aliases", SpeakerAliasModel.alias_norm, SpeakerAliasModel.speaker_id, unique=True)
+Index(
+    "idx_name_proposals_label",
+    MeetingSpeakerNameProposalModel.meeting_id,
+    MeetingSpeakerNameProposalModel.speaker_label,
+    unique=True,
+)
+Index("idx_name_proposals_meeting", MeetingSpeakerNameProposalModel.meeting_id)
+Index("idx_group_members_group", InsightGroupMemberModel.group_id)
+Index(
+    "idx_group_members_unique",
+    InsightGroupMemberModel.group_id,
+    InsightGroupMemberModel.meeting_id,
+    unique=True,
+)
+Index("idx_group_members_meeting", InsightGroupMemberModel.meeting_id)
+Index("idx_group_snapshots_group", InsightGroupSnapshotModel.group_id, InsightGroupSnapshotModel.created_at)
 
 __all__ = [
     "ArtifactModel",
     "Base",
     "ChatMessageModel",
+    "InsightGroupMemberModel",
+    "InsightGroupModel",
+    "InsightGroupSnapshotModel",
     "LogModel",
     "MeetingModel",
+    "MeetingMomentModel",
     "MeetingSpeakerModel",
+    "MeetingSpeakerNameProposalModel",
+    "MeetingSpeakerSignalModel",
     "PlaudIngestStateModel",
     "PlaudDeletedFileModel",
     "RecordingModel",
+    "SpeakerAliasModel",
     "SpeakerModel",
     "StageRunModel",
     "SyncStateModel",
     "TemplateModel",
+    "TranscriptImportModel",
     "UsageEventModel",
 ]

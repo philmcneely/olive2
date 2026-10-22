@@ -129,6 +129,104 @@ CREATE_TABLE_STATEMENTS: list[str] = [
     detail TEXT,
     created_at INTEGER NOT NULL
   )""",
+    """CREATE TABLE IF NOT EXISTS meeting_speaker_signals (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    speaker_id TEXT REFERENCES speakers(id),
+    speaker_label TEXT NOT NULL,
+    identity_source TEXT,
+    identity_confidence REAL,
+    dimensions TEXT NOT NULL DEFAULT '{}',
+    talk_ms INTEGER NOT NULL DEFAULT 0,
+    turn_count INTEGER NOT NULL DEFAULT 0,
+    interrupt_count INTEGER NOT NULL DEFAULT 0,
+    stance TEXT,
+    transcript_hash TEXT,
+    prompt_version TEXT,
+    model TEXT,
+    provider TEXT,
+    transcript_artifact_id TEXT,
+    created_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS meeting_moments (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    speaker_id TEXT REFERENCES speakers(id),
+    speaker_label TEXT,
+    toward_speaker_id TEXT REFERENCES speakers(id),
+    toward_label TEXT,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER,
+    turn_start_idx INTEGER,
+    turn_end_idx INTEGER,
+    event_type TEXT NOT NULL,
+    valence TEXT NOT NULL,
+    framework TEXT,
+    dimension TEXT,
+    severity REAL,
+    quote TEXT NOT NULL,
+    rationale TEXT,
+    guidance TEXT,
+    verified INTEGER NOT NULL DEFAULT 0,
+    identity_source TEXT,
+    identity_confidence REAL,
+    transcript_hash TEXT,
+    prompt_version TEXT,
+    created_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS transcript_imports (
+    id TEXT PRIMARY KEY,
+    content_sha256 TEXT NOT NULL UNIQUE,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    source_format TEXT,
+    subtype TEXT,
+    created_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS speaker_aliases (
+    id TEXT PRIMARY KEY,
+    alias_norm TEXT NOT NULL,
+    speaker_id TEXT REFERENCES speakers(id),
+    kind TEXT,
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS meeting_speaker_name_proposals (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    speaker_label TEXT NOT NULL,
+    proposed_name TEXT,
+    confidence REAL,
+    evidence_quote TEXT,
+    evidence_turn_idx INTEGER,
+    evidence_type TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    model TEXT,
+    provider TEXT,
+    created_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS insight_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    axes TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS insight_group_members (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES insight_groups(id),
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    added_at INTEGER NOT NULL
+  )""",
+    """CREATE TABLE IF NOT EXISTS insight_group_snapshots (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES insight_groups(id),
+    created_at INTEGER NOT NULL,
+    member_count INTEGER NOT NULL,
+    axes TEXT NOT NULL,
+    meeting_ids TEXT NOT NULL,
+    reason TEXT
+  )""",
     """CREATE TABLE IF NOT EXISTS alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
@@ -149,6 +247,19 @@ CREATE_INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_chat_messages_meeting_created ON chat_messages(meeting_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_created ON usage_events(created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_meeting ON usage_events(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_signals_meeting ON meeting_speaker_signals(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_signals_speaker ON meeting_speaker_signals(speaker_id)",
+    "CREATE INDEX IF NOT EXISTS idx_moments_meeting ON meeting_moments(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_moments_speaker ON meeting_moments(speaker_id, start_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_moments_event ON meeting_moments(event_type)",
+    "CREATE INDEX IF NOT EXISTS idx_moments_start ON meeting_moments(start_ms)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_speaker_aliases ON speaker_aliases(alias_norm, speaker_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_name_proposals_label ON meeting_speaker_name_proposals(meeting_id, speaker_label)",
+    "CREATE INDEX IF NOT EXISTS idx_name_proposals_meeting ON meeting_speaker_name_proposals(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_members_group ON insight_group_members(group_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_unique ON insight_group_members(group_id, meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_members_meeting ON insight_group_members(meeting_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_snapshots_group ON insight_group_snapshots(group_id, created_at)",
 ]
 
 ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
@@ -165,6 +276,9 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("stage_runs", "finished_at", "INTEGER"),
     ("plaud_ingest_state", "pcs_resolved", "INTEGER NOT NULL DEFAULT 0"),
     ("plaud_ingest_state", "duplicate_of_meeting_id", "TEXT REFERENCES meetings(id)"),
+    ("meeting_speakers", "identity_source", "TEXT"),
+    ("meeting_speakers", "identity_confidence", "REAL"),
+    ("meeting_speaker_name_proposals", "evidence_type", "TEXT"),
 ]
 
 DEFAULT_TEMPLATES: list[dict[str, Any]] = [

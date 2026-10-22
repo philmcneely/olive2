@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from .layout import meeting_paths
 from .ml.audio import enhance_audio_file_async
 from .schemas import LogItem
 from .services.ingest import IngestService
+from .services.insights.llm_query import MAX_FIND_EVENTS_LIMIT
 from .services.meetings import (
     delete_meeting,
     get_meeting,
@@ -60,6 +62,65 @@ def _bool_query_param(value: str | None, default: bool) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() in ("true", "1", "yes")
+
+
+DEFAULT_MAX_TRANSCRIPT_IMPORT_BYTES = 10 * 1024 * 1024
+# Allowance for multipart framing / JSON escaping on top of the transcript's own byte cap.
+_IMPORT_BODY_OVERHEAD_BYTES = 64 * 1024
+
+
+async def _read_capped_body(request: Request, limit: int) -> bytes | None:
+    """Read the request body, returning ``None`` as soon as more than ``limit`` bytes arrive."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _replayed_request(request: Request, body: bytes) -> Request:
+    """A request over the same scope whose body is the already-read ``body``."""
+    sent = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(request.scope, receive)
+
+
+def _time_bound_param(value: Any) -> int | None:
+    """Parse a from/to bound (epoch ms or ISO-8601 date/datetime, UTC when naive); blank is None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid time bound: {value!r}")
+    if isinstance(value, int | float):
+        return int(value)
+    raw = str(value).strip()
+    if raw.lstrip("-").isdigit():
+        return int(raw)
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp() * 1000)
+
+
+def _alias_list(values: Any) -> list[str]:
+    """Normalise ``meAliases`` (list, or comma/newline separated string(s)) into a clean list."""
+    items = values if isinstance(values, list | tuple) else [values]
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        out.extend(a.strip() for a in item.replace("\n", ",").split(",") if a.strip())
+    return out
 
 
 def _is_loopback_host(hostname: str) -> bool:
@@ -219,6 +280,18 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     llm_service = opts.get("llmService") or opts.get("llm_service")
     summary_service = opts.get("summaryService") or opts.get("summary_service")
     title_service = opts.get("titleService") or opts.get("title_service")
+    insights_service = opts.get("insightsService") or opts.get("insights_service")
+    insights_query_service = opts.get("insightsQueryService") or opts.get("insights_query_service")
+    insight_group_service = opts.get("insightGroupService") or opts.get("insight_group_service")
+    insights_llm_service = opts.get("insightsLlmService") or opts.get("insights_llm_service")
+    transcript_import_service = opts.get("transcriptImportService") or opts.get(
+        "transcript_import_service"
+    )
+    max_transcript_import_bytes = int(
+        opts.get("maxTranscriptImportBytes")
+        or opts.get("max_transcript_import_bytes")
+        or DEFAULT_MAX_TRANSCRIPT_IMPORT_BYTES
+    )
     chat_service = opts.get("chatService") or opts.get("chat_service")
     backup_service = opts.get("backupService") or opts.get("backup_service")
     plaud_poller = opts.get("plaudPoller") or opts.get("plaud_poller")
@@ -310,6 +383,63 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             )
         return summary_service
 
+    def get_insights_service() -> Any:
+        nonlocal insights_service
+        if insights_service is None:
+            from .services.insights.extract import InsightsService
+            from .workflows import configure_insights_queue
+
+            insights_service = InsightsService(
+                db=db,
+                meetings_dir=meetings_dir,
+                config_dir=config_dir,
+                llm_service=get_llm_service(),
+            )
+            configure_insights_queue(insights_service)
+        return insights_service
+
+    def get_insights_query_service() -> Any:
+        nonlocal insights_query_service
+        if insights_query_service is None:
+            from .services.insights.query import InsightsQueryService
+
+            insights_query_service = InsightsQueryService(db=db, config_dir=config_dir)
+        return insights_query_service
+
+    def get_insight_group_service() -> Any:
+        nonlocal insight_group_service
+        if insight_group_service is None:
+            from .services.insight_groups import InsightGroupService
+
+            insight_group_service = InsightGroupService(db=db, config_dir=config_dir)
+        return insight_group_service
+
+    def get_insights_llm_service() -> Any:
+        nonlocal insights_llm_service
+        if insights_llm_service is None:
+            from .services.insights.llm_query import InsightsLlmService
+
+            insights_llm_service = InsightsLlmService(
+                db=db,
+                meetings_dir=meetings_dir,
+                config_dir=config_dir,
+                llm_service=get_llm_service(),
+            )
+        return insights_llm_service
+
+    def get_transcript_import_service() -> Any:
+        nonlocal transcript_import_service
+        if transcript_import_service is None:
+            from .services.transcript_import import TranscriptImportService
+
+            transcript_import_service = TranscriptImportService(
+                db=db,
+                meetings_dir=meetings_dir,
+                config_dir=config_dir,
+                insights_service=get_insights_service(),
+            )
+        return transcript_import_service
+
     def get_title_service() -> Any:
         nonlocal title_service
         if title_service is None:
@@ -350,6 +480,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                 config_dir=config_dir,
             )
             transcription_service.set_summary_service(get_summary_service())
+            transcription_service.set_insights_service(get_insights_service())
         return transcription_service
 
     def get_speaker_service() -> Any:
@@ -418,6 +549,14 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             transcription_service.set_summary_service(summary_service)
         elif hasattr(transcription_service, "setSummaryService"):
             transcription_service.setSummaryService(summary_service)
+
+    if transcription_service is not None:
+        # Injected transcription service: same insights auto-enqueue wiring as the lazy path.
+        _set_insights = getattr(transcription_service, "set_insights_service", None) or getattr(
+            transcription_service, "setInsightsService", None
+        )
+        if callable(_set_insights):
+            _set_insights(get_insights_service())
 
     ingest_service: IngestService = (
         opts.get("ingestService")
@@ -519,8 +658,13 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                     pass
             await asyncio.to_thread(shutdown_dbos)
 
-    from .workflows.transcription_workflow import configure_recovery_runtime
+    from .workflows.transcription_workflow import (
+        configure_insights_service_factory,
+        configure_recovery_runtime,
+    )
 
+    # Insights jobs DBOS resumes after a restart rebuild their service through this factory.
+    configure_insights_service_factory(get_insights_service)
     configure_recovery_runtime(
         db=db,
         progress_sink=lambda meeting_id, update: get_transcription_service().emit_progress(
@@ -534,6 +678,12 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     )
 
     app = FastAPI(title="Olive API", version=__version__, lifespan=lifespan)
+
+    # Compress text responses (JS/CSS/JSON). The SPA bundle is ~1 MB uncompressed;
+    # gzip takes it to ~250 KB, which dominates first-load time on the LAN.
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
     async def mcp_endpoint(request: Request) -> Response:
@@ -552,6 +702,9 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             title_service=get_title_service(),
             plaud_poller=plaud_poller,
             template_service=template_service,
+            insights_service=get_insights_service(),
+            insights_query_service=get_insights_query_service(),
+            insights_llm_service=get_insights_llm_service(),
         )
 
     if (
@@ -684,6 +837,431 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             return JSONResponse(result, status_code=200 if result.get("deduped") else 201)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # -- Olive Insights -------------------------------------------------------------
+
+    def _insights_disabled() -> JSONResponse | None:
+        """404 for every /api/insights/* route while the feature is off (it ships disabled)."""
+        if get_insights_service().is_enabled():
+            return None
+        return JSONResponse({"error": "insights disabled"}, status_code=404)
+
+    # -- Insight Groups -------------------------------------------------------------
+
+    async def _json_body(request: Request) -> dict[str, Any] | None:
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
+    def _group_not_found() -> JSONResponse:
+        return JSONResponse({"error": "group not found"}, status_code=404)
+
+    def _valid_axes(value: Any) -> bool:
+        return value is None or (isinstance(value, list) and all(isinstance(a, str) for a in value))
+
+    @app.get("/api/insights/groups")
+    async def list_insight_groups_route() -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        groups = await asyncio.to_thread(get_insight_group_service().list_groups)
+        return JSONResponse({"groups": groups})
+
+    @app.post("/api/insights/groups")
+    async def create_insight_group_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        if body is None or not isinstance(body.get("name"), str) or not body["name"].strip():
+            return JSONResponse({"error": "name is required"}, status_code=400)
+        desc = body.get("description")
+        if desc is not None and not isinstance(desc, str):
+            return JSONResponse({"error": "description must be a string"}, status_code=400)
+        if not _valid_axes(body.get("axes")):
+            return JSONResponse({"error": "axes must be a list of strings"}, status_code=400)
+        group = await asyncio.to_thread(
+            get_insight_group_service().create_group, body["name"], desc, body.get("axes")
+        )
+        return JSONResponse(group, status_code=201)
+
+    @app.post("/api/insights/groups/compare")
+    async def compare_insight_groups_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        ids = body.get("groupIds") if body else None
+        include_default = body.get("includeDefault", True) if body else True
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or not isinstance(include_default, bool):
+            return JSONResponse(
+                {"error": "groupIds must be a list of strings and includeDefault a boolean"}, status_code=400
+            )
+        svc = get_insight_group_service()
+        for gid in dict.fromkeys(ids):
+            if not await asyncio.to_thread(svc.exists, gid):
+                return _group_not_found()
+        return JSONResponse(await asyncio.to_thread(svc.compare, ids, include_default))
+
+    @app.get("/api/insights/groups/{group_id}")
+    async def get_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        group = await asyncio.to_thread(get_insight_group_service().get_group, group_id)
+        return JSONResponse(group) if group is not None else _group_not_found()
+
+    @app.patch("/api/insights/groups/{group_id}")
+    async def update_insight_group_route(group_id: str, request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        name = body.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            return JSONResponse({"error": "name must be a non-empty string"}, status_code=400)
+        if "description" in body and body["description"] is not None and not isinstance(body["description"], str):
+            return JSONResponse({"error": "description must be a string"}, status_code=400)
+        if "axes" in body and not _valid_axes(body["axes"]):
+            return JSONResponse({"error": "axes must be a list of strings"}, status_code=400)
+        kwargs: dict[str, Any] = {k: body[k] for k in ("description", "axes") if k in body}
+        group = await asyncio.to_thread(get_insight_group_service().update_group, group_id, name, **kwargs)
+        return JSONResponse(group) if group is not None else _group_not_found()
+
+    @app.delete("/api/insights/groups/{group_id}")
+    async def delete_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        if not await asyncio.to_thread(get_insight_group_service().delete_group, group_id):
+            return _group_not_found()
+        return JSONResponse({"deleted": True})
+
+    @app.post("/api/insights/groups/{group_id}/members")
+    async def add_insight_group_members_route(group_id: str, request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body = await _json_body(request)
+        ids = body.get("meetingIds") if body else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            if await asyncio.to_thread(get_insight_group_service().get_group, group_id) is None:
+                return _group_not_found()
+            return JSONResponse({"error": "meetingIds must be a list of strings"}, status_code=400)
+        res = await asyncio.to_thread(get_insight_group_service().add_members, group_id, ids)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.delete("/api/insights/groups/{group_id}/members/{meeting_id}")
+    async def remove_insight_group_member_route(group_id: str, meeting_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().remove_member, group_id, meeting_id)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.get("/api/insights/groups/{group_id}/trends")
+    async def get_insight_group_trends_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().get_trends, group_id)
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.post("/api/insights/groups/{group_id}/snapshot")
+    async def snapshot_insight_group_route(group_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insight_group_service().snapshot_group, group_id, "manual")
+        return JSONResponse(res) if res is not None else _group_not_found()
+
+    @app.get("/api/insights/overview")
+    async def get_insights_overview_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        q = request.query_params
+        group_id = q.get("group") or None
+        if group_id is not None and not await asyncio.to_thread(get_insight_group_service().exists, group_id):
+            return _group_not_found()
+        try:
+            res = await asyncio.to_thread(
+                get_insights_query_service().overview,
+                q.get("from") or None,
+                q.get("to") or None,
+                q.get("speaker") or None,
+                q.get("tag") or None,
+                q.get("bucket") or "month",
+                group_id=group_id,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/person/{speaker_id}")
+    async def get_insights_person_route(speaker_id: str, request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        q = request.query_params
+        try:
+            res = await asyncio.to_thread(
+                get_insights_query_service().person,
+                speaker_id,
+                q.get("from") or None,
+                q.get("to") or None,
+                q.get("bucket") or "month",
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/meeting/{meeting_id}")
+    async def get_insights_meeting_route(meeting_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        res = await asyncio.to_thread(get_insights_query_service().meeting, meeting_id)
+        if res is None:
+            return JSONResponse({"error": "Meeting not found"}, status_code=404)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/dyads")
+    async def get_insights_dyads_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        q = request.query_params
+        group_id = q.get("group") or None
+        if group_id is not None and not await asyncio.to_thread(get_insight_group_service().exists, group_id):
+            return _group_not_found()
+        try:
+            res = await asyncio.to_thread(
+                get_insights_query_service().dyads,
+                None,
+                q.get("from") or None,
+                q.get("to") or None,
+                q.get("bucket") or "month",
+                group_id=group_id,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/find")
+    async def get_insights_find_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        q = request.query_params
+        query = (q.get("q") or "").strip()
+        if not query:
+            return JSONResponse({"error": "q is required"}, status_code=400)
+        limit = 5
+        if q.get("limit"):
+            try:
+                limit = int(q["limit"])
+            except ValueError:
+                return JSONResponse({"error": "limit must be an integer"}, status_code=400)
+        try:
+            results = await get_insights_llm_service().find_events(
+                query, min(max(limit, 1), MAX_FIND_EVENTS_LIMIT)
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({"query": query, "results": results})
+
+    @app.get("/api/insights/playbook/{speaker_id}")
+    async def get_insights_playbook_route(speaker_id: str) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        try:
+            res = await get_insights_llm_service().playbook(speaker_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/coaching")
+    async def get_insights_coaching_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        speaker = request.query_params.get("speaker") or None
+        try:
+            res = await get_insights_llm_service().coaching("speaker" if speaker else "all", speaker)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse(res)
+
+    @app.get("/api/insights/me")
+    async def get_insights_me_route() -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        return JSONResponse(await asyncio.to_thread(get_insights_query_service().get_me))
+
+    @app.put("/api/insights/me")
+    async def put_insights_me_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        speaker_id = body.get("speakerId")
+        aliases = body.get("aliases", [])
+        if speaker_id is not None and not isinstance(speaker_id, str):
+            return JSONResponse({"error": "speakerId must be a string or null"}, status_code=400)
+        if not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases):
+            return JSONResponse({"error": "aliases must be a list of strings"}, status_code=400)
+        res = await asyncio.to_thread(
+            get_insights_query_service().set_me, speaker_id or None, aliases
+        )
+        return JSONResponse(res)
+
+    @app.post("/api/insights/backfill")
+    async def post_insights_backfill_route(request: Request) -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+        body: Any = {}
+        if (await request.body()).strip():
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "JSON object body required"}, status_code=400)
+        try:
+            frm = _time_bound_param(body.get("from"))
+            to = _time_bound_param(body.get("to"))
+            limit = int(body["limit"]) if body.get("limit") is not None else None
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Invalid from, to, or limit"}, status_code=400)
+        from .services.insights import backfill as insights_backfill
+
+        # Constructing the service registers the durable queue hook backfill enqueues through.
+        get_insights_service()
+        res = await insights_backfill.backfill(
+            db,
+            meetings_dir,
+            config_dir,
+            frm=frm,
+            to=to,
+            force=bool(body.get("force")),
+            limit=limit,
+        )
+        return JSONResponse(res, status_code=202)
+
+    @app.get("/api/insights/status")
+    async def get_insights_status_route() -> JSONResponse:
+        if (off := _insights_disabled()) is not None:
+            return off
+
+        def _counts() -> dict[str, int]:
+            with db.connect() as conn:
+                transcribed = conn.execute(
+                    text("SELECT COUNT(*) FROM meetings WHERE primary_transcript_artifact_id IS NOT NULL")
+                ).scalar_one()
+                analyzed = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM meetings m WHERE m.primary_transcript_artifact_id IS NOT NULL "
+                        "AND EXISTS (SELECT 1 FROM meeting_speaker_signals s WHERE s.meeting_id = m.id)"
+                    )
+                ).scalar_one()
+            return {
+                "transcribedMeetings": int(transcribed),
+                "analyzedMeetings": int(analyzed),
+                "pendingMeetings": int(transcribed) - int(analyzed),
+            }
+
+        return JSONResponse(await asyncio.to_thread(_counts))
+
+    @app.post("/api/transcripts/import")
+    async def post_transcript_import_route(request: Request) -> JSONResponse:
+        if ingest_token:
+            auth_header = request.headers.get("authorization") or ""
+            if auth_header != f"Bearer {ingest_token}":
+                return JSONResponse(
+                    {"error": "Unauthorized: invalid or missing ingest token"},
+                    status_code=401,
+                )
+
+        too_large = JSONResponse(
+            {"error": f"Transcript exceeds the {max_transcript_import_bytes} byte limit"},
+            status_code=413,
+        )
+        declared = _numeric_query_param(request.headers.get("content-length"))
+        if declared is not None and declared > max_transcript_import_bytes:
+            return too_large
+
+        content_type = (request.headers.get("content-type") or "").lower()
+        is_multipart = "multipart/form-data" in content_type
+        is_json = "application/json" in content_type
+        if not is_multipart and not is_json:
+            return JSONResponse(
+                {"error": "Multipart form data or a JSON body is required"}, status_code=400
+            )
+
+        # Content-Length can be absent (chunked) or a lie, so count bytes as they arrive and stop
+        # at the cap instead of letting the framework buffer an unbounded body. The slack covers
+        # multipart framing / JSON escaping around a transcript that is itself within the cap.
+        raw = await _read_capped_body(request, max_transcript_import_bytes + _IMPORT_BODY_OVERHEAD_BYTES)
+        if raw is None:
+            return too_large
+
+        opts_in: dict[str, Any]
+        if is_multipart:
+            try:
+                form = await _replayed_request(request, raw).form()
+            except Exception:
+                return JSONResponse({"error": "Invalid multipart form data"}, status_code=400)
+            file_field = form.get("file")
+            if file_field is None or not hasattr(file_field, "read"):
+                return JSONResponse({"error": "file field (transcript) is required"}, status_code=400)
+            content = await file_field.read()  # type: ignore[union-attr]
+            opts_in = {
+                "content": content,
+                "filename": getattr(file_field, "filename", None),
+                "meAliases": _alias_list(form.getlist("meAliases")),
+            }
+            for key in ("title", "startTime", "subtype", "format"):
+                value = form.get(key)
+                if isinstance(value, str) and value.strip():
+                    opts_in[key] = value.strip()
+        else:
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+            if not isinstance(body, dict) or not isinstance(body.get("content"), str):
+                return JSONResponse(
+                    {"error": "JSON body with a string content field is required"}, status_code=400
+                )
+            content = body["content"]
+            opts_in = {
+                "content": content,
+                "filename": body.get("filename") if isinstance(body.get("filename"), str) else None,
+                "meAliases": _alias_list(body.get("meAliases") or []),
+            }
+            for key in ("title", "startTime", "subtype", "format"):
+                value = body.get(key)
+                if value is not None and value != "":
+                    opts_in[key] = value
+
+        # Measure bytes, not characters: multi-byte text is far larger on disk than len() says.
+        size = len(content) if isinstance(content, bytes | bytearray) else len(content.encode("utf-8"))
+        if size > max_transcript_import_bytes:
+            return too_large
+
+        from .services.transcript_import import MissingStartTimeError
+
+        try:
+            result = await get_transcript_import_service().import_transcript(opts_in)
+        except MissingStartTimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            from .logging_db import logger as _import_logger
+
+            _import_logger.error("Transcript import failed", {"category": "import", "error": str(exc)})
+            return JSONResponse({"error": "Transcript import failed"}, status_code=500)
+        return JSONResponse(result, status_code=200 if result.get("deduped") else 201)
 
     @app.get("/api/meetings/{meeting_id}")
     async def get_meeting_detail_route(meeting_id: str, request: Request) -> JSONResponse:
@@ -839,6 +1417,32 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
+    def _has_insights_signals(meeting_id: str) -> bool:
+        with db.connect() as conn:
+            return (
+                conn.execute(
+                    text("SELECT 1 FROM meeting_speaker_signals WHERE meeting_id = :id LIMIT 1"),
+                    {"id": meeting_id},
+                ).first()
+                is not None
+            )
+
+    async def _enqueue_insights_after_split(meeting_ids: list[str]) -> None:
+        """Queue replacement analysis for split halves; never fails the split itself."""
+        try:
+            service = get_insights_service()
+            if not service.is_enabled():
+                return
+            for mid in meeting_ids:
+                await service.enqueue_analyze(mid)
+        except Exception as exc:
+            from .logging_db import logger as _split_logger
+
+            _split_logger.warn(
+                "Insights enqueue after meeting split failed",
+                {"category": "insights", "meetingIds": meeting_ids, "error": str(exc)},
+            )
+
     @app.post("/api/meetings/{meeting_id}/split")
     async def post_meeting_split_route(meeting_id: str, request: Request) -> JSONResponse:
         try:
@@ -852,7 +1456,13 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         try:
             from .services.split import split_meeting
 
+            was_analyzed = await asyncio.to_thread(_has_insights_signals, meeting_id)
             result = await asyncio.to_thread(split_meeting, db, meetings_dir, meeting_id, int(raw))
+            if was_analyzed:
+                # split_meeting dropped the whole-meeting signals; analyze each half afresh.
+                await _enqueue_insights_after_split(
+                    [meeting_id, str(result["newMeeting"]["id"])]
+                )
             return JSONResponse(result)
         except ValueError as exc:
             msg = str(exc)
@@ -2598,6 +3208,15 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             if candidate and candidate.is_file():
                 if candidate.name == "index.html":
                     return FileResponse(candidate, headers=no_cache_headers)
+                # Vite emits content-hashed asset names (e.g. index-ABC123.js), so
+                # they are safe to cache forever — a new build changes the name.
+                # Anchor on the assets/ prefix: a non-hashed file elsewhere must not
+                # inherit a one-year immutable cache and go stale after a deploy.
+                if full_path.startswith("assets/"):
+                    return FileResponse(
+                        candidate,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+                    )
                 return FileResponse(candidate)
             index_path = Path(str(web_root)) / "index.html"
             if index_path.is_file():
@@ -2663,6 +3282,34 @@ def export_openapi_schema() -> dict[str, Any]:
         s.LogListResponse,
         s.RapidEnrollCandidatesResponse,
         s.RapidEnrollAssignResponse,
+        s.InsightsSeriesPoint,
+        s.InsightsDyadPoint,
+        s.InsightsOverview,
+        s.InsightsPerson,
+        s.InsightsMeetingSignals,
+        s.InsightsMoment,
+        s.InsightsDyad,
+        s.InsightsDyads,
+        s.InsightsFindResult,
+        s.InsightsFindResponse,
+        s.InsightsPlaybook,
+        s.InsightsCoaching,
+        s.InsightsBackfillResult,
+        s.InsightsStatus,
+        s.InsightsMe,
+        s.InsightGroup,
+        s.InsightGroupList,
+        s.InsightGroupMember,
+        s.InsightGroupMemberPoint,
+        s.InsightGroupAggregate,
+        s.InsightGroupSnapshot,
+        s.InsightGroupChange,
+        s.InsightGroupTrends,
+        s.InsightGroupCompare,
+        s.InsightGroupCompareGroup,
+        s.InsightGroupCompareDefault,
+        s.InsightGroupCompareDefaultCoverage,
+        s.TranscriptImportResult,
     ]
     for model_cls in domain_models:
         json_schema = model_cls.model_json_schema(

@@ -17,6 +17,9 @@ import "./styles.css";
 import { Combobox } from "./components/Combobox";
 import { ConfirmHostRoot, Modal as UiModal, ThemeToggle, ToastProvider, confirmAction, notify } from "./components/ui";
 import { SpeakerCombobox, SpeakerStatusBadges } from "./components/SpeakerCombobox";
+import { InsightsView } from "./components/InsightsView";
+import { AddToGroupModal, InsightGroupsView } from "./components/InsightGroupsView";
+import { ImportTranscriptModal } from "./components/ImportTranscriptModal";
 import {
   ENGINE_OPTIONS,
   LOG_LEVEL_OPTIONS,
@@ -112,6 +115,20 @@ function formatDuration(ms: number): string {
     return `${hours}h ${minutes}m`;
   }
   return `${minutes}m ${seconds}s`;
+}
+
+/** Wrap the first case-insensitive occurrence of `quote` in `text` with <mark>; falls back to plain text. */
+function highlightQuote(text: string, quote: string | null): ReactNode {
+  if (!quote) return text;
+  const at = text.toLowerCase().indexOf(quote.toLowerCase());
+  if (at < 0) return text;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="rounded bg-primary/30 px-0.5 text-base-content">{text.slice(at, at + quote.length)}</mark>
+      {text.slice(at + quote.length)}
+    </>
+  );
 }
 
 function formatTimeOffset(ms: number): string {
@@ -332,7 +349,22 @@ function MeetingChatRuntime({ meetingId, initialMessages }: { meetingId: string;
   );
 }
 
-type TabKey = "meetings" | "speakers" | "templates" | "logs" | "backup" | "usage";
+type TabKey = "meetings" | "speakers" | "templates" | "logs" | "backup" | "usage" | "insights" | "groups";
+
+/** Transcript moment to scroll to and highlight when a meeting is opened via `?t={startMs}&q={quote}`. */
+interface MeetingFocus {
+  ms: number;
+  quote: string | null;
+}
+
+function parseFocus(search: string): MeetingFocus | null {
+  const params = new URLSearchParams(search);
+  const raw = params.get("t");
+  if (raw === null || raw.trim() === "") return null;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return { ms, quote: params.get("q")?.trim() || null };
+}
 
 function parseLocation(pathname: string): { tab: TabKey; meetingId: string | null } {
   const clean = pathname.replace(/^\/+|\/+$/g, "");
@@ -365,6 +397,14 @@ function parseLocation(pathname: string): { tab: TabKey; meetingId: string | nul
     return { tab: "usage", meetingId: null };
   }
 
+  if (clean === "insights") {
+    return { tab: "insights", meetingId: null };
+  }
+
+  if (clean === "groups") {
+    return { tab: "groups", meetingId: null };
+  }
+
   return { tab: "meetings", meetingId: null };
 }
 
@@ -375,6 +415,8 @@ const NAV_TABS: { key: TabKey; path: string; label: string }[] = [
   { key: "logs", path: "/logs", label: "Logs" },
   { key: "backup", path: "/backup", label: "Backup" },
   { key: "usage", path: "/usage", label: "Usage" },
+  { key: "insights", path: "/insights", label: "Insights" },
+  { key: "groups", path: "/groups", label: "Groups" },
 ];
 
 const TAB_ICON_CONTENT: Record<TabKey, ReactNode> = {
@@ -404,6 +446,15 @@ const TAB_ICON_CONTENT: Record<TabKey, ReactNode> = {
     </>
   ),
   usage: <path d="M4 20V10M10 20V4M16 20v-7M2 20h20" />,
+  insights: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
+  groups: (
+    <>
+      <rect x="3" y="3" width="8" height="8" rx="1" />
+      <rect x="13" y="3" width="8" height="8" rx="1" />
+      <rect x="3" y="13" width="8" height="8" rx="1" />
+      <path d="M17 14v6M14 17h6" />
+    </>
+  ),
 };
 
 function TabIcon({ name }: { name: TabKey }): ReactElement {
@@ -418,6 +469,9 @@ export function App(): ReactElement {
   const initialRoute = parseLocation(typeof window !== "undefined" ? window.location.pathname : "/");
   const [activeTab, setActiveTab] = useState<TabKey>(initialRoute.tab);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(initialRoute.meetingId);
+  const [meetingFocus, setMeetingFocus] = useState<MeetingFocus | null>(
+    typeof window !== "undefined" ? parseFocus(window.location.search) : null
+  );
 
   // Global speakers cache
   const [knownSpeakers, setKnownSpeakers] = useState<SpeakerWithStats[]>([]);
@@ -441,12 +495,14 @@ export function App(): ReactElement {
   const isTabActive = (key: TabKey) => (key === "meetings" ? activeTab === "meetings" && !selectedMeetingId : activeTab === key);
 
   const navigate = (path: string) => {
-    const route = parseLocation(path);
+    const [pathname, search = ""] = path.split("?");
+    const route = parseLocation(pathname);
     setActiveTab(route.tab);
     setSelectedMeetingId(route.meetingId);
+    setMeetingFocus(route.meetingId ? parseFocus(search) : null);
     setChatOpen(false);
     setShowMoreNav(false);
-    if (typeof window !== "undefined" && window.location.pathname !== path) {
+    if (typeof window !== "undefined" && window.location.pathname + window.location.search !== path) {
       window.history.pushState({}, "", path);
     }
   };
@@ -456,6 +512,7 @@ export function App(): ReactElement {
       const route = parseLocation(window.location.pathname);
       setActiveTab(route.tab);
       setSelectedMeetingId(route.meetingId);
+      setMeetingFocus(route.meetingId ? parseFocus(window.location.search) : null);
     };
 
     window.addEventListener("popstate", handlePopState);
@@ -615,7 +672,7 @@ export function App(): ReactElement {
           aria-expanded={showMoreNav}
           aria-label="More sections"
           onClick={() => setShowMoreNav((v) => !v)}
-          className={activeTab === "logs" || activeTab === "backup" ? "dock-active" : ""}
+          className={activeTab === "logs" || activeTab === "backup" || activeTab === "insights" || activeTab === "groups" ? "dock-active" : ""}
         >
           <Ellipsis className="h-5 w-5" aria-hidden="true" />
           <span className="dock-label">More</span>
@@ -624,7 +681,7 @@ export function App(): ReactElement {
       {showMoreNav && (
         <div className="fixed inset-x-4 bottom-20 z-40 sm:hidden">
           <ul className="menu rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
-            {(NAV_TABS.filter((t) => t.key === "logs" || t.key === "backup")).map((tab) => (
+            {(NAV_TABS.filter((t) => t.key === "logs" || t.key === "backup" || t.key === "insights" || t.key === "groups")).map((tab) => (
               <li key={tab.key}>
                 <a
                   href={tab.path}
@@ -649,6 +706,7 @@ export function App(): ReactElement {
         {selectedMeetingId ? (
           <MeetingDetailView
             meetingId={selectedMeetingId}
+            focus={meetingFocus}
             knownSpeakers={knownSpeakers}
             onBack={() => navigate("/meetings")}
             onDeleted={() => navigate("/meetings")}
@@ -672,6 +730,10 @@ export function App(): ReactElement {
           />
         ) : activeTab === "usage" ? (
           <UsageView onSelectMeeting={(id) => navigate(`/meetings/${id}`)} />
+        ) : activeTab === "insights" ? (
+          <InsightsView onNavigate={navigate} speakers={knownSpeakers.map((s) => ({ id: s.id, name: s.name }))} />
+        ) : activeTab === "groups" ? (
+          <InsightGroupsView onNavigate={navigate} />
         ) : (
           <BackupRestoreView
             onRestoreComplete={() => {
@@ -1044,8 +1106,10 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -1315,6 +1379,14 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
           >
             <span>+</span> Upload Audio
           </button>
+          <button
+            type="button"
+            onClick={() => setShowImportModal(true)}
+            className="btn btn-primary btn-soft flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-2 shrink-0"
+            title="Import an existing text transcript (no audio)"
+          >
+            <span><FileText className="h-4 w-4 shrink-0" aria-hidden="true" /></span> Import Transcript
+          </button>
         </div>
       </div>
 
@@ -1330,6 +1402,11 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
           <button type="button" onClick={handleSelectVisible} className="btn min-h-[36px] hover:border-primary/60 hover:text-primary">
             Select visible ({meetings.length})
           </button>
+          {selectedIds.length > 0 && (
+            <button type="button" onClick={() => setShowGroupModal(true)} className="btn btn-primary btn-soft min-h-[36px]">
+              Add to group
+            </button>
+          )}
           {selectedIds.length > 0 && (
             <button type="button" onClick={handleClearSelection} className="btn min-h-[36px] hover:border-error/60 hover:text-error">
               Clear
@@ -1352,7 +1429,7 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
           {meetings.map((meeting) => {
             const selected = selectedIds.includes(meeting.id);
             const progress = activeProgressMap[meeting.id];
-            const audioPending = meeting.audioStatus === "retrieving" || meeting.audioStatus === "missing";
+            const audioPending = meeting.source !== "import" && (meeting.audioStatus === "retrieving" || meeting.audioStatus === "missing");
             return (
               <div
                 key={meeting.id}
@@ -1389,6 +1466,7 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
                       <span>{formatDuration(meeting.endTime - meeting.startTime)}</span>
                       <span>•</span>
                       <span className="capitalize">{meeting.source}</span>
+                      {meeting.source === "import" && <span className="badge badge-sm badge-outline">imported transcript</span>}
                     </div>
                   </div>
                   <button
@@ -1409,12 +1487,12 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
                 </div>
 
                 <div className="mt-auto flex flex-wrap items-center gap-1.5">
-                  {meeting.audioStatus === "retrieving" && !progress ? (
+                  {meeting.source !== "import" && meeting.audioStatus === "retrieving" && !progress ? (
                     <span className="badge badge-info badge-soft gap-1.5 px-3 py-1 animate-pulse">
                       <span className="status status-info status-xs animate-ping" />
                       Retrieving audio…
                     </span>
-                  ) : meeting.audioStatus === "missing" && !progress ? (
+                  ) : meeting.source !== "import" && meeting.audioStatus === "missing" && !progress ? (
                     <span className="badge badge-error badge-soft gap-1.5 px-3 py-1">
                       Audio missing
                     </span>
@@ -1488,6 +1566,17 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
         </div>
       )}
 
+      {showGroupModal && (
+        <AddToGroupModal
+          meetingIds={selectedIds}
+          onClose={() => setShowGroupModal(false)}
+          onDone={() => {
+            setShowGroupModal(false);
+            exitSelectMode();
+          }}
+        />
+      )}
+
       {showBulkModal && (
         <BulkTranscribeModal
           selectedIds={selectedIds}
@@ -1500,6 +1589,16 @@ function MeetingsListView({ onSelectMeeting }: { onSelectMeeting: (id: string) =
               setSelectedIds([]);
             }
             void fetchMeetings({ silent: true });
+          }}
+        />
+      )}
+
+      {showImportModal && (
+        <ImportTranscriptModal
+          onClose={() => setShowImportModal(false)}
+          onImported={(meetingId) => {
+            setShowImportModal(false);
+            onSelectMeeting(meetingId);
           }}
         />
       )}
@@ -1787,6 +1886,7 @@ function SegmentActionsMenu({
 
 function MeetingDetailView({
   meetingId,
+  focus,
   knownSpeakers,
   onBack,
   onDeleted,
@@ -1795,6 +1895,7 @@ function MeetingDetailView({
   onChatTitle
 }: {
   meetingId: string;
+  focus: MeetingFocus | null;
   knownSpeakers: SpeakerWithStats[];
   onBack: () => void;
   onDeleted: () => void;
@@ -1849,7 +1950,10 @@ function MeetingDetailView({
   const [splitResult, setSplitResult] = useState<{ newMeetingId: string; newTitle: string } | null>(null);
 
   const audioStatus = detail?.meeting.audioStatus ?? (detail && detail.recordings.length === 0 ? "retrieving" : "ready");
-  const hasNoAudio = !!detail && audioStatus !== "ready";
+  // Imported transcripts never have a recording: that is expected, not a missing/retrievable audio state.
+  const isImported = detail?.meeting.source === "import";
+  const hasNoAudio = !!detail && !isImported && audioStatus !== "ready";
+  const [focusedSegmentIndex, setFocusedSegmentIndex] = useState<number | null>(null);
 
   const handleRetryAudio = async () => {
     if (retryingAudio) return;
@@ -2539,6 +2643,31 @@ function MeetingDetailView({
     }
   }
 
+  // Deep link from Insights (?t={startMs}&q={quote}): scroll to the turn containing that moment and highlight it.
+  const focusSegmentIndex = useMemo(() => {
+    if (!focus || parsedTranscriptSegments.length === 0) return null;
+    const containing = parsedTranscriptSegments.findIndex((s) => focus.ms >= s.startMs && focus.ms < s.endMs);
+    if (containing >= 0) return containing;
+    let before = -1;
+    parsedTranscriptSegments.forEach((s, i) => {
+      if (s.startMs <= focus.ms) before = i;
+    });
+    return before >= 0 ? before : 0;
+  }, [focus, parsedTranscriptSegments.length, detail?.transcriptContent]);
+
+  useEffect(() => {
+    if (focusSegmentIndex === null) {
+      setFocusedSegmentIndex(null);
+      return;
+    }
+    setMobileSection("transcript");
+    setFocusedSegmentIndex(focusSegmentIndex);
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`transcript-seg-${focusSegmentIndex}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusSegmentIndex, focus]);
+
   const summaries = detail?.summaries || [];
   const activeSummary =
     summaries.find((s) => s.id === selectedSummaryId) ||
@@ -2762,7 +2891,7 @@ function MeetingDetailView({
 
               <button
                 type="button"
-                disabled={transcribing || hasNoAudio}
+                disabled={transcribing || hasNoAudio || isImported}
                 onClick={() => void handleTriggerTranscription()}
                 title={hasNoAudio ? "Transcription unlocks once the meeting audio is attached" : undefined}
                 className="btn btn-primary inline-flex min-h-[44px] items-center gap-2 disabled:opacity-75 disabled:cursor-not-allowed shrink-0"
@@ -2819,6 +2948,12 @@ function MeetingDetailView({
             </div>
             </div>
           </header>
+
+          {isImported && (
+            <div className="rounded-xl border border-base-300 bg-base-200/60 p-3 text-sm text-base-content/70">
+              <span className="font-semibold text-base-content">Imported transcript.</span> There is no recording for this meeting, so playback and re-transcription are unavailable.
+            </div>
+          )}
 
           {/* Audio not yet attached — retrieving or missing banner */}
           {hasNoAudio && (
@@ -3433,7 +3568,10 @@ function MeetingDetailView({
                 {parsedTranscriptSegments.map((seg, idx) => (
                   <div
                     key={idx}
-                    className="group relative rounded-xl border border-base-300/70 bg-base-200/40 p-3 sm:p-4 transition hover:border-base-300 hover:bg-base-200/80 space-y-2 w-full max-w-full min-w-0"
+                    id={`transcript-seg-${idx}`}
+                    className={`group relative rounded-xl border p-3 sm:p-4 transition hover:border-base-300 hover:bg-base-200/80 space-y-2 w-full max-w-full min-w-0 scroll-mt-24 ${
+                      focusedSegmentIndex === idx ? "border-primary bg-primary/10 ring-2 ring-primary/40" : "border-base-300/70 bg-base-200/40"
+                    }`}
                   >
                     {idx > 0 && splitAllowedAt(seg.startMs) && (
                       <div className="absolute -top-3 left-0 right-0 z-10 flex justify-center opacity-0 transition group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100">
@@ -3498,7 +3636,9 @@ function MeetingDetailView({
                     </div>
 
                     {/* Turn Content */}
-                    <p className="text-sm leading-relaxed text-base-content pl-0.5 break-words">{seg.text}</p>
+                    <p className="text-sm leading-relaxed text-base-content pl-0.5 break-words">
+                      {focusedSegmentIndex === idx ? highlightQuote(seg.text, focus?.quote ?? null) : seg.text}
+                    </p>
                   </div>
                 ))}
               </div>

@@ -23,6 +23,7 @@ QUEUE_SPEECHMATICS = "speechmatics"
 QUEUE_ASSEMBLYAI = "assemblyai"
 QUEUE_MUSE = "muse"
 QUEUE_SUMMARIZE = "summarize"
+QUEUE_INSIGHTS = "insights"
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ STAGE_QUEUE_SPECS: tuple[StageQueueSpec, ...] = (
     StageQueueSpec(name=QUEUE_ASSEMBLYAI, worker_concurrency=2),
     StageQueueSpec(name=QUEUE_MUSE, worker_concurrency=2),
     StageQueueSpec(name=QUEUE_SUMMARIZE, worker_concurrency=2),
+    StageQueueSpec(name=QUEUE_INSIGHTS, worker_concurrency=1),
 )
 
 __all__ = [
@@ -57,6 +59,7 @@ __all__ = [
     "QUEUE_DRIVER",
     "QUEUE_DIARIZE",
     "QUEUE_FFMPEG",
+    "QUEUE_INSIGHTS",
     "QUEUE_PIPELINE",
     "QUEUE_PLAUD_SYNC",
     "QUEUE_SPEAKER_EMBED",
