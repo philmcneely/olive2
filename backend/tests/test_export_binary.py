@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -61,7 +62,7 @@ def test_pdf_many_pages_and_unbreakable_word() -> None:
     segs = [seg(i * 1000, i * 1000 + 900, f"S{i % 3}", "lorem ipsum dolor sit amet " * 5) for i in range(600)]
     segs.append(seg(700_000, 701_000, "Z", "x" * 5000))
     data = export.to_pdf(make_doc(segs))
-    assert data.count(b"/Type /Page\n") + data.count(b"/Type /Page ") >= 5 or len(data) > 20_000
+    assert len(re.findall(rb"/Type /Page\b(?!s)", data)) >= 5
 
 
 def test_pdf_hostile_text_does_not_break_generation() -> None:
