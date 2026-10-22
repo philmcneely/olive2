@@ -3199,7 +3199,13 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     from .routes_export_share import register_export_share_routes
 
     # Must stay before the SPA catch-all below (it also owns /share/{token}).
-    register_export_share_routes(app, db=db, meetings_dir=meetings_dir)
+    register_export_share_routes(
+        app,
+        db=db,
+        meetings_dir=meetings_dir,
+        get_config=_current_app_config,
+        now_ms=opts.get("shareNowMs"),
+    )
 
     web_root = opts.get("webRoot") or opts.get("web_root")
     if web_root:

@@ -348,7 +348,8 @@ def test_all_failure_modes_return_identical_404(env: Env) -> None:
         "revoked": _token_from(revoked),
         "expired": expiring,
         "deleted meeting": doomed,
-        "traversal": "..%2F..%2Fetc%2Fpasswd",
+        "trailing newline": "A" * 43 + "%0A",
+        "sqlish": "%27%20OR%201%3D1%20--" + "A" * 30,
     }
     seen = {}
     for name, tok in bad.items():
