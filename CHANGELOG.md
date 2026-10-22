@@ -17,10 +17,12 @@ every section newer than the previous tag into the GitHub release notes.
 
 ### Changed
 
+- **Cross-site request protection.** Browser requests that change data (POST/PUT/PATCH/DELETE) are now rejected with 403 when their `Origin` is not Olive itself, localhost, the bind host, or an entry in the new `OLIVE_ALLOWED_ORIGINS` list. Clients that send no `Origin` (the iOS Shortcut, curl, MCP clients, webhooks) are unaffected. Set `OLIVE_ALLOWED_HOSTS` to also reject unexpected `Host` headers (DNS-rebinding protection); it is off by default.
 - **Faster page loads** — responses are gzip-compressed on the wire (the app bundle drops from ~1.05MB to ~300KB) and content-hashed static assets are cached long-term, so the app loads noticeably quicker on repeat visits.
 
 ### Fixed
 
+- **Share links enabled by `OLIVE_SHARE_ENABLED` no longer get saved into your settings.** Saving settings while the environment variable controls the flag now leaves the stored value alone, so removing the variable turns sharing off as expected.
 - **Speaker-name proposals respect who a name belongs to.** The naming pass previously treated any name spoken in a turn as the speaker's own, so "Hey Bill" could label the current speaker as Bill. It now distinguishes a self-introduction ("I'm Phil" → the speaker) from a name said to someone else ("Hey Bill" → the person addressed), and only proposes an addressed name in a two-speaker meeting where the addressee is unambiguous. Proposals still require your confirmation.
 - **Local LLM transcription/analysis no longer returns empty results on thinking models.** Self-hosted models that stream their reasoning separately (e.g. qwen3.x via vLLM/llama.cpp) had their thinking disabled so the answer lands in the response body, with a fallback that reads the reasoning stream if needed. Every LLM call is also time-bounded so a wedged local endpoint can't stall background work indefinitely.
 
