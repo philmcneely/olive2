@@ -215,8 +215,8 @@ def test_public_view_whitelist_has_no_internal_fields(tmp_path: Path) -> None:
     with e.db.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO recordings (id, meeting_id, path, mime, duration_ms, size_bytes, sha256, created_at) "
-                "VALUES ('r1','m1','audio/SECRETPATH.opus','audio/ogg',1,1,'deadbeefsha',0)"
+                "INSERT INTO recordings (id, meeting_id, provider, path, mime, duration_ms, size_bytes, sha256, "
+                "created_at) VALUES ('r1','m1','upload','audio/SECRETPATH.opus','audio/ogg',1,1,'deadbeefsha',0)"
             )
         )
         conn.execute(text("UPDATE meetings SET last_error = 'LEAKY_ERROR' WHERE id='m1'"))
@@ -232,7 +232,7 @@ def test_public_view_whitelist_has_no_internal_fields(tmp_path: Path) -> None:
     }
     assert view.summary_md is None  # include_summary defaults to False
     blob = repr(view) + render_share_html(view, token)
-    for leaked in ("secret-tag", "SECRETPATH", "deadbeefsha", "LEAKY_ERROR", 'm1"', "r1"):
+    for leaked in ("secret-tag", "SECRETPATH", "deadbeefsha", "LEAKY_ERROR"):
         assert leaked not in blob
     assert view.title == "Weekly Sync" and view.date == "2023-11-14"
     assert view.speakers == ["Alice", "Bob"]

@@ -109,7 +109,7 @@ def load_export_doc(
     duration_ms = transcript.durationMs or (wall_ms if wall_ms > 0 else None)
     speakers: list[str] = []
     for s in segments:
-        name = _one_line(s.speaker)
+        name = one_line(s.speaker)
         if name and name not in speakers:
             speakers.append(name)
     summary = detail.summaryContent if include_summary else None
@@ -131,7 +131,7 @@ def _strip_control(value: str) -> str:
     return _CONTROL_CHARS.sub("", value)
 
 
-def _one_line(value: str) -> str:
+def one_line(value: str) -> str:
     return _WS_RUN.sub(" ", _strip_control(value or "")).strip()
 
 
@@ -159,7 +159,7 @@ def format_vtt_time(ms: int) -> str:
     return _stamp(ms, ".")
 
 
-def _clock(ms: int) -> str:
+def clock(ms: int) -> str:
     """Human timestamp: ``mm:ss`` below an hour, ``h:mm:ss`` from an hour up."""
     total = max(0, int(ms)) // 1000
     h, rem = divmod(total, 3600)
@@ -181,7 +181,7 @@ def _cues(segments: list[TranscriptSegment]) -> list[tuple[int, int, str, str]]:
             continue
         start = max(0, seg.startMs, prev_start)
         end = seg.endMs if seg.endMs > start else start + MIN_CUE_MS
-        cues.append((start, end, _one_line(seg.speaker), text))
+        cues.append((start, end, one_line(seg.speaker), text))
         prev_start = start
     return cues
 
@@ -190,9 +190,9 @@ def _turns(doc: ExportDoc) -> list[tuple[int, str, str]]:
     """Coalesced speaker turns as ``(start_ms, speaker, one-line text)``."""
     turns = []
     for seg in coalesce_speaker_segments(doc.segments):
-        text = _one_line(seg.text)
+        text = one_line(seg.text)
         if text:
-            turns.append((max(0, seg.startMs), _one_line(seg.speaker), text))
+            turns.append((max(0, seg.startMs), one_line(seg.speaker), text))
     return turns
 
 
@@ -200,22 +200,22 @@ def _meta(doc: ExportDoc) -> list[tuple[str, str]]:
     when = datetime.fromtimestamp(doc.start_time_ms / 1000.0, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
     rows = [("Date", when)]
     if doc.duration_ms:
-        rows.append(("Duration", _clock(doc.duration_ms)))
+        rows.append(("Duration", clock(doc.duration_ms)))
     if doc.speakers:
-        rows.append(("Participants", ", ".join(_one_line(s) for s in doc.speakers)))
+        rows.append(("Participants", ", ".join(one_line(s) for s in doc.speakers)))
     return rows
 
 
 def _turn_line(start: int, speaker: str, text: str, timestamps: bool) -> str:
     who = f"{speaker}: " if speaker else ""
-    return f"[{_clock(start)}] {who}{text}" if timestamps else f"{who}{text}"
+    return f"[{clock(start)}] {who}{text}" if timestamps else f"{who}{text}"
 
 
 # -- text formats ----------------------------------------------------------------
 
 
 def to_txt(doc: ExportDoc, timestamps: bool = True) -> str:
-    out = [_one_line(doc.title) or "Meeting"]
+    out = [one_line(doc.title) or "Meeting"]
     out += [f"{k}: {v}" for k, v in _meta(doc)]
     if doc.summary_md:
         out += ["", "Summary", _strip_control(doc.summary_md)]
@@ -225,13 +225,13 @@ def to_txt(doc: ExportDoc, timestamps: bool = True) -> str:
 
 
 def to_markdown(doc: ExportDoc, timestamps: bool = True) -> str:
-    out = [f"# {_one_line(doc.title) or 'Meeting'}", ""]
+    out = [f"# {one_line(doc.title) or 'Meeting'}", ""]
     out += [f"- **{k}:** {v}" for k, v in _meta(doc)]
     if doc.summary_md:
         out += ["", "## Summary", "", _strip_control(doc.summary_md)]
     out += ["", "## Transcript", ""]
     for start, who, text in _turns(doc):
-        label = f"[{_clock(start)}] " if timestamps else ""
+        label = f"[{clock(start)}] " if timestamps else ""
         head = f"**{label}{who}:**" if who else (f"**{label.strip()}**" if label else "")
         out.append(f"{head} {text}".strip())
         out.append("")
@@ -317,14 +317,14 @@ def _para(*runs: str, style: str | None = None) -> str:
 
 
 def to_docx(doc: ExportDoc, timestamps: bool = True) -> bytes:
-    paras = [_para(_run(_one_line(doc.title) or "Meeting"), style="Title")]
+    paras = [_para(_run(one_line(doc.title) or "Meeting"), style="Title")]
     paras += [_para(_run(f"{k}: {v}")) for k, v in _meta(doc)]
     if doc.summary_md:
         paras.append(_para(_run("Summary"), style="Heading1"))
         paras += [_para(_run(ln)) for ln in _strip_control(doc.summary_md).splitlines() if ln.strip()]
     paras.append(_para(_run("Transcript"), style="Heading1"))
     for start, who, text in _turns(doc):
-        label = f"[{_clock(start)}] " if timestamps else ""
+        label = f"[{clock(start)}] " if timestamps else ""
         head = f"{label}{who}: " if who else label
         paras.append(_para(_run(head, bold=True), _run(text)) if head else _para(_run(text)))
     document = (
@@ -378,7 +378,7 @@ def to_pdf(doc: ExportDoc, timestamps: bool = True) -> bytes:
     pdf.set_margins(18, 18, 18)
     pdf.set_creation_date(datetime.fromtimestamp(max(doc.start_time_ms, 0) / 1000.0, tz=UTC))
     pdf.set_producer("Olive")
-    pdf.set_title(t(_one_line(doc.title)) or "Meeting")
+    pdf.set_title(t(one_line(doc.title)) or "Meeting")
     if unicode_font:
         pdf.add_font("DejaVu", "", str(regular))
         pdf.add_font("DejaVu", "B", str(bold))
@@ -394,7 +394,7 @@ def to_pdf(doc: ExportDoc, timestamps: bool = True) -> bytes:
         if gap:
             pdf.ln(gap)
 
-    block(t(_one_line(doc.title)) or "Meeting", style="B", size=17, h=8, gap=2)
+    block(t(one_line(doc.title)) or "Meeting", style="B", size=17, h=8, gap=2)
     pdf.set_text_color(90, 90, 90)
     for k, v in _meta(doc):
         block(t(f"{k}: {v}"), size=9.5, h=5)
@@ -408,7 +408,7 @@ def to_pdf(doc: ExportDoc, timestamps: bool = True) -> bytes:
         pdf.ln(3)
     block("Transcript", style="B", size=13, h=7, gap=1)
     for start, who, text in _turns(doc):
-        label = f"[{_clock(start)}] " if timestamps else ""
+        label = f"[{clock(start)}] " if timestamps else ""
         head = t(f"{label}{who}")
         if head:
             block(head, style="B", size=9.5, h=5)
@@ -436,7 +436,7 @@ def render(doc: ExportDoc, fmt: ExportFormat, *, timestamps: bool = True) -> byt
 
 
 def export_filename(doc: ExportDoc, fmt: ExportFormat) -> str:
-    title = sanitize_filename(_one_line(doc.title)) or "meeting"
+    title = sanitize_filename(one_line(doc.title)) or "meeting"
     return f"{date_stamp(doc.start_time_ms)}_{title}.{fmt}"
 
 
