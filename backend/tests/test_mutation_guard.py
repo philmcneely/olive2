@@ -92,7 +92,7 @@ def test_localhost_lookalikes_blocked(tmp_path: Path) -> None:
 
 
 def test_bind_host_and_env_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = make_client(tmp_path, bindHost="192.168.0.50")
+    client = make_client(tmp_path, bindHost="192.168.0.50", mcpToken="t")
     assert client.delete("/api/logs", headers={"Origin": "http://192.168.0.50:9999"}).status_code == 200
     assert blocked(client.delete("/api/logs", headers={"Origin": "https://olive.example.com"}))
     monkeypatch.setenv("OLIVE_ALLOWED_ORIGINS", " https://olive.example.com , http://nas.local:8080 ")
@@ -102,7 +102,7 @@ def test_bind_host_and_env_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_wildcard_bind_host_is_not_an_allowed_origin(tmp_path: Path) -> None:
-    client = make_client(tmp_path, bindHost="0.0.0.0")
+    client = make_client(tmp_path, bindHost="0.0.0.0", mcpToken="t")
     assert blocked(client.delete("/api/logs", headers={"Origin": "http://0.0.0.0:4471"}))
 
 
@@ -186,7 +186,7 @@ def test_host_check_on_rejects_unknown_host_and_allows_listed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OLIVE_ALLOWED_HOSTS", "olive.lan, 192.168.0.50")
-    client = make_client(tmp_path, bindHost="10.0.0.9")
+    client = make_client(tmp_path, bindHost="10.0.0.9", mcpToken="t")
     bad = client.delete("/api/logs", headers={"Host": "rebind.evil.example"})
     assert bad.status_code == 403 and HOST_MSG in bad.text
     for host in (
