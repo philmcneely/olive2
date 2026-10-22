@@ -227,6 +227,18 @@ CREATE_TABLE_STATEMENTS: list[str] = [
     meeting_ids TEXT NOT NULL,
     reason TEXT
   )""",
+    """CREATE TABLE IF NOT EXISTS meeting_share_links (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+    token_hash TEXT NOT NULL UNIQUE,
+    label TEXT,
+    include_summary INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    last_accessed_at INTEGER,
+    access_count INTEGER NOT NULL DEFAULT 0
+  )""",
     """CREATE TABLE IF NOT EXISTS alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
@@ -260,6 +272,7 @@ CREATE_INDEX_STATEMENTS: list[str] = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_unique ON insight_group_members(group_id, meeting_id)",
     "CREATE INDEX IF NOT EXISTS idx_group_members_meeting ON insight_group_members(meeting_id)",
     "CREATE INDEX IF NOT EXISTS idx_group_snapshots_group ON insight_group_snapshots(group_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_share_links_meeting ON meeting_share_links(meeting_id)",
 ]
 
 ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [

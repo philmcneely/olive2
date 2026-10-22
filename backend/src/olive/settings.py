@@ -123,6 +123,8 @@ class AppConfig(BaseModel):
     insightsEnabled: bool = Field(default=False)
     insightsProvider: str = Field(default="")
     insightsModel: str = Field(default="")
+    shareLinksEnabled: bool = Field(default=False)
+    shareDefaultTtlHours: int = Field(default=168, ge=0)  # 0 = links never expire
 
     @field_validator("localAsrModel", mode="before")
     @classmethod
