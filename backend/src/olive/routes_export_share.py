@@ -10,12 +10,13 @@ OpenAPI document and ``frontend/src/api/schema.d.ts`` do not drift.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import Body, FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -49,7 +50,8 @@ def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status)
 
 
-_EXPORT_STATUS = {"not_found": 404, "no_transcript": 409, "bad_format": 400}
+_log = logging.getLogger(__name__)
+_EXPORT_STATUS = {"not_found": 404, "no_transcript": 409, "bad_format": 400, "too_large": 413}
 
 
 _NOT_FOUND_HTML = (
@@ -76,6 +78,12 @@ def _link_json(link: ShareLink) -> dict[str, Any]:
 def _public_not_found() -> Response:
     """The single response every public failure mode returns (no existence/expiry oracle)."""
     return HTMLResponse(_NOT_FOUND_HTML, status_code=404, headers=SHARE_RESPONSE_HEADERS)
+
+
+def _public_failure() -> Response:
+    """Unexpected render/view bug on a valid token: logged without the token, hardened headers kept."""
+    _log.error("share page/download failed", exc_info=True)
+    return PlainTextResponse("Something went wrong.", status_code=500, headers=SHARE_RESPONSE_HEADERS)
 
 
 def _parse_create_body(payload: Any, default_ttl_hours: int) -> tuple[float | None, str | None, bool]:
@@ -201,28 +209,42 @@ def register_export_share_routes(
             return _public_not_found()
         try:
             view = shares.public_view(link)
+            return HTMLResponse(render_share_html(view, token), headers=SHARE_RESPONSE_HEADERS)
         except ExportError:
             return _public_not_found()
-        return HTMLResponse(render_share_html(view, token), headers=SHARE_RESPONSE_HEADERS)
+        except Exception:
+            return _public_failure()
 
     @app.get("/share/{token}/download", include_in_schema=False)
     def public_share_download(token: str, format: str = "txt", timestamps: str | None = None) -> Response:
+        # Validate the format before resolving so a bad format is indistinguishable
+        # from a bad token (same 404 body and headers).
+        if format not in export_svc.EXPORT_MEDIA_TYPES:
+            return _public_not_found()
+        fmt: export_svc.ExportFormat = format  # type: ignore[assignment]
         link = shares.resolve(token)
         if link is None:
             return _public_not_found()
-        if format not in export_svc.EXPORT_MEDIA_TYPES:
-            return _error(400, "Unsupported format")
-        fmt: export_svc.ExportFormat = format  # type: ignore[assignment]
         try:
             doc = shares.export_doc(link)
             payload = export_svc.render(doc, fmt, timestamps=_flag(timestamps, True))
-        except ExportError:
+            return Response(
+                content=payload,
+                media_type=export_svc.EXPORT_MEDIA_TYPES[fmt],
+                headers={
+                    **SHARE_RESPONSE_HEADERS,
+                    "Content-Disposition": export_svc.content_disposition(
+                        export_svc.export_filename(doc, fmt)
+                    ),
+                },
+            )
+        except ExportError as exc:
+            if exc.code == "too_large":
+                return PlainTextResponse(
+                    "This transcript is too large to export in this format.",
+                    status_code=413,
+                    headers=SHARE_RESPONSE_HEADERS,
+                )
             return _public_not_found()
-        return Response(
-            content=payload,
-            media_type=export_svc.EXPORT_MEDIA_TYPES[fmt],
-            headers={
-                **SHARE_RESPONSE_HEADERS,
-                "Content-Disposition": export_svc.content_disposition(export_svc.export_filename(doc, fmt)),
-            },
-        )
+        except Exception:
+            return _public_failure()
