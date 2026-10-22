@@ -12,7 +12,13 @@ from fastapi.testclient import TestClient
 from export_support import T0, seed_meeting
 from olive.app import create_app
 from olive.db import DbHandle, create_db
-from olive.settings import AppConfig, clear_app_config_cache, resolve_paths, save_app_config
+from olive.settings import (
+    AppConfig,
+    clear_app_config_cache,
+    load_app_config,
+    resolve_paths,
+    save_app_config,
+)
 
 
 class Clock:

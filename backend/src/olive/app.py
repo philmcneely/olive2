@@ -2781,11 +2781,19 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    def _effective_config_payload(config: Any) -> dict[str, Any]:
+        """Masked config for the UI; shareLinksEnabled is the EFFECTIVE value (env wins over stored)."""
+        from .services.sharing import share_links_enabled
+
+        payload = mask_app_config(config)
+        payload["shareLinksEnabled"] = share_links_enabled(config)
+        return payload
+
     @app.get("/api/config")
     async def get_config_route() -> JSONResponse:
         try:
             config = load_app_config(app_config_paths)
-            return JSONResponse(mask_app_config(config))
+            return JSONResponse(_effective_config_payload(config))
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -2809,7 +2817,7 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
                     updated.transcriptionProvider,
                 )
             ingest_service.set_default_transcription_provider(updated.transcriptionProvider)
-            return JSONResponse({"status": "updated", "config": mask_app_config(updated)})
+            return JSONResponse({"status": "updated", "config": _effective_config_payload(updated)})
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
