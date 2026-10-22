@@ -2809,6 +2809,12 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
             current = load_app_config(app_config_paths)
+            from .services.sharing import share_env_override_active
+
+            if share_env_override_active():
+                # The env var is authoritative: never let a settings save persist the
+                # effective (env-derived) flag, or it would outlive the variable.
+                body = {k: v for k, v in body.items() if k != "shareLinksEnabled"}
             merged = {**current.model_dump(), **body}
             for secret_field in ("hfToken", "speechmaticsApiKey", "assemblyaiApiKey", "museApiKey"):
                 if secret_field in body and is_masked_secret(body.get(secret_field)):

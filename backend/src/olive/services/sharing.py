@@ -88,11 +88,16 @@ class ShareDisabledError(Exception):
     """Share links are switched off (``shareLinksEnabled`` / ``OLIVE_SHARE_ENABLED``)."""
 
 
+def share_env_override_active() -> bool:
+    """True when ``OLIVE_SHARE_ENABLED`` is set (non-blank), i.e. the env owns the flag."""
+    env = os.environ.get(ENABLED_ENV)
+    return env is not None and bool(env.strip())
+
+
 def share_links_enabled(config: Any) -> bool:
     """``OLIVE_SHARE_ENABLED`` wins when set (unrecognized values fail closed), else the setting."""
-    env = os.environ.get(ENABLED_ENV)
-    if env is not None and env.strip():
-        return env.strip().lower() in _TRUTHY
+    if share_env_override_active():
+        return os.environ[ENABLED_ENV].strip().lower() in _TRUTHY
     return bool(getattr(config, "shareLinksEnabled", False)) if config is not None else False
 
 
