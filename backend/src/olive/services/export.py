@@ -17,6 +17,7 @@ import io
 import json
 import logging
 import re
+import threading
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,13 @@ EXPORT_MEDIA_TYPES: dict[ExportFormat, str] = {
 
 MIN_CUE_MS = 1000
 
+# PDF/DOCX rendering is CPU/memory heavy and the API is unauthenticated, so
+# oversized transcripts are refused and concurrent heavy renders are bounded.
+MAX_EXPORT_SEGMENTS = 50_000
+MAX_EXPORT_TEXT_BYTES = 2_000_000
+_HEAVY_RENDER = threading.BoundedSemaphore(3)
+_HEAVY_FORMATS = ("pdf", "docx")
+
 # XML 1.0 / text-hostile characters (keeps \t \n \r): C0 controls, DEL, lone
 # surrogates (would crash UTF-8 encoding) and the U+FFFE/U+FFFF non-characters.
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff\ufffe\uffff]")
@@ -56,7 +64,9 @@ _WS_RUN = re.compile(r"\s+")
 class ExportError(Exception):
     """Raised for caller-visible export failures; ``code`` maps to an HTTP status."""
 
-    def __init__(self, code: Literal["not_found", "no_transcript", "bad_format"], message: str = "") -> None:
+    def __init__(
+        self, code: Literal["not_found", "no_transcript", "bad_format", "too_large"], message: str = ""
+    ) -> None:
         super().__init__(message or code)
         self.code = code
 
@@ -419,6 +429,16 @@ def to_pdf(doc: ExportDoc, timestamps: bool = True) -> bytes:
 # -- dispatch & naming -----------------------------------------------------------
 
 
+def _check_size(doc: ExportDoc) -> None:
+    if len(doc.segments) > MAX_EXPORT_SEGMENTS:
+        raise ExportError("too_large", "transcript is too large to export in this format")
+    total = 0
+    for seg in doc.segments:
+        total += len(seg.text.encode("utf-8", "replace"))
+        if total > MAX_EXPORT_TEXT_BYTES:
+            raise ExportError("too_large", "transcript is too large to export in this format")
+
+
 def render(doc: ExportDoc, fmt: ExportFormat, *, timestamps: bool = True) -> bytes:
     if fmt == "txt":
         return to_txt(doc, timestamps).encode("utf-8")
@@ -428,10 +448,10 @@ def render(doc: ExportDoc, fmt: ExportFormat, *, timestamps: bool = True) -> byt
         return to_srt(doc).encode("utf-8")
     if fmt == "vtt":
         return to_vtt(doc).encode("utf-8")
-    if fmt == "pdf":
-        return to_pdf(doc, timestamps)
-    if fmt == "docx":
-        return to_docx(doc, timestamps)
+    if fmt in _HEAVY_FORMATS:
+        _check_size(doc)
+        with _HEAVY_RENDER:
+            return to_pdf(doc, timestamps) if fmt == "pdf" else to_docx(doc, timestamps)
     raise ExportError("bad_format", f"unsupported format: {fmt!r}")
 
 
