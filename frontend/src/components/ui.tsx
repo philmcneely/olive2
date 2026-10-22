@@ -166,24 +166,36 @@ export function Modal({
   title,
   ariaLabel,
   maxWidth = "max-w-lg",
+  stacked = false,
   children,
 }: {
   onClose: () => void;
   title: ReactNode;
   ariaLabel: string;
   maxWidth?: string;
+  /** Dialog opened on top of another Modal (e.g. a confirm). daisyUI's .modal is z-index 999, so stacked sits above it. */
+  stacked?: boolean;
   children: ReactNode;
 }): ReactElement {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // A stacked dialog handles Escape first (capture) and keeps the modal beneath it open.
+      if (stacked) e.stopImmediatePropagation();
+      onClose();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    window.addEventListener("keydown", onKeyDown, stacked);
+    return () => window.removeEventListener("keydown", onKeyDown, stacked);
+  }, [onClose, stacked]);
 
   return (
-    <div className="modal modal-open modal-middle" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <div
+      className="modal modal-open modal-middle"
+      style={stacked ? { zIndex: 1000 } : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+    >
       <div className={`modal-box ${maxWidth} max-h-[90dvh] overflow-y-auto`}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="min-w-0 flex-1 text-lg font-semibold">{title}</h2>
@@ -223,7 +235,7 @@ export function ConfirmDialog({
 }): ReactElement | null {
   if (!open) return null;
   return (
-    <Modal onClose={onCancel} title={title} ariaLabel={title}>
+    <Modal onClose={onCancel} title={title} ariaLabel={title} stacked>
       <div className="text-sm text-base-content/80">{message}</div>
       <div className="modal-action">
         <Button variant="ghost" onClick={onCancel} disabled={busy}>
