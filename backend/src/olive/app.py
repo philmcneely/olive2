@@ -3196,6 +3196,11 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
+    from .routes_export_share import register_export_share_routes
+
+    # Must stay before the SPA catch-all below (it also owns /share/{token}).
+    register_export_share_routes(app, db=db, meetings_dir=meetings_dir)
+
     web_root = opts.get("webRoot") or opts.get("web_root")
     if web_root:
 

@@ -38,7 +38,7 @@ EXPORT_MEDIA_TYPES: dict[ExportFormat, str] = {
     "txt": "text/plain; charset=utf-8",
     "md": "text/markdown; charset=utf-8",
     "srt": "application/x-subrip",
-    "vtt": "text/vtt",
+    "vtt": "text/vtt; charset=utf-8",
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }

@@ -226,7 +226,7 @@ def test_render_dispatch_and_bad_format() -> None:
 def test_media_types() -> None:
     assert export.EXPORT_MEDIA_TYPES["txt"] == "text/plain; charset=utf-8"
     assert export.EXPORT_MEDIA_TYPES["srt"] == "application/x-subrip"
-    assert export.EXPORT_MEDIA_TYPES["vtt"] == "text/vtt"
+    assert export.EXPORT_MEDIA_TYPES["vtt"] == "text/vtt; charset=utf-8"
     assert export.EXPORT_MEDIA_TYPES["pdf"] == "application/pdf"
     assert export.EXPORT_MEDIA_TYPES["docx"].endswith("wordprocessingml.document")
     assert set(export.EXPORT_MEDIA_TYPES) == {"txt", "md", "srt", "vtt", "pdf", "docx"}

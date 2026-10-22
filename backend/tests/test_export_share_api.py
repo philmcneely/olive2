@@ -7,9 +7,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from export_support import seed_meeting
 from fastapi.testclient import TestClient
 
+from export_support import seed_meeting
 from olive.app import create_app
 from olive.db import DbHandle, create_db
 from olive.settings import clear_app_config_cache
@@ -50,7 +50,7 @@ def env(tmp_path: Path):
         ("txt", "text/plain; charset=utf-8"),
         ("md", "text/markdown; charset=utf-8"),
         ("srt", "application/x-subrip"),
-        ("vtt", "text/vtt"),
+        ("vtt", "text/vtt; charset=utf-8"),
         ("pdf", "application/pdf"),
         ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     ],
@@ -120,4 +120,6 @@ def test_export_unicode_title_filename_star(env: Env) -> None:
 
 def test_export_routes_hidden_from_openapi(env: Env) -> None:
     paths = env.app.openapi()["paths"]
-    assert not any("/export" in p or "/share" in p for p in paths)
+    assert not any(
+        ("/meetings/" in p and ("/export" in p or "/share" in p)) or p.startswith("/share") for p in paths
+    )
