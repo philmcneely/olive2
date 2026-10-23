@@ -1912,7 +1912,14 @@ class PlaudPoller:
         return summary
 
     async def enqueue_transcript_backfill(self, limit: int = 500) -> dict[str, Any]:
-        """Queue a full (cooldown-free) transcript backfill on the plaud_sync queue."""
+        """Queue an on-demand transcript backfill on the plaud_sync queue.
+
+        Uses a short 60s cooldown rather than 0 so a burst of calls (or a
+        collision with the auto-drain pass in ``_run_poll``) cannot re-fetch a
+        row that was just checked, which would hammer the Plaud API and risk a
+        double ingest. Rows untouched in the last minute still drain in full,
+        so this remains a complete on-demand sweep.
+        """
         from ..workflows import (
             QUEUE_PLAUD_SYNC,
             enqueue_stage_job,
@@ -1925,7 +1932,7 @@ class PlaudPoller:
         )
         await enqueue_stage_job(
             QUEUE_PLAUD_SYNC,
-            lambda: self.backfill_plaud_transcripts(limit, cooldown_ms=0),
+            lambda: self.backfill_plaud_transcripts(limit, cooldown_ms=60_000),
             deduplication_id="plaud-backfill-transcripts",
             label="plaud-backfill-transcripts",
         )
