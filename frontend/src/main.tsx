@@ -18,6 +18,7 @@ import { Combobox } from "./components/Combobox";
 import { ConfirmHostRoot, Modal as UiModal, ThemeToggle, ToastProvider, confirmAction, notify } from "./components/ui";
 import { SpeakerCombobox, SpeakerStatusBadges } from "./components/SpeakerCombobox";
 import { InsightsView } from "./components/InsightsView";
+import { SearchView } from "./components/SearchView";
 import { AddToGroupModal, InsightGroupsView } from "./components/InsightGroupsView";
 import { ImportTranscriptModal } from "./components/ImportTranscriptModal";
 import {
@@ -349,7 +350,7 @@ function MeetingChatRuntime({ meetingId, initialMessages }: { meetingId: string;
   );
 }
 
-type TabKey = "meetings" | "speakers" | "templates" | "logs" | "backup" | "usage" | "insights" | "groups";
+type TabKey = "meetings" | "search" | "speakers" | "templates" | "logs" | "backup" | "usage" | "insights" | "groups";
 
 /** Transcript moment to scroll to and highlight when a meeting is opened via `?t={startMs}&q={quote}`. */
 interface MeetingFocus {
@@ -375,6 +376,10 @@ function parseLocation(pathname: string): { tab: TabKey; meetingId: string | nul
   if (clean.startsWith("meetings/")) {
     const id = clean.slice("meetings/".length).trim();
     return { tab: "meetings", meetingId: id || null };
+  }
+
+  if (clean === "search") {
+    return { tab: "search", meetingId: null };
   }
 
   if (clean === "people" || clean === "speakers") {
@@ -410,6 +415,7 @@ function parseLocation(pathname: string): { tab: TabKey; meetingId: string | nul
 
 const NAV_TABS: { key: TabKey; path: string; label: string }[] = [
   { key: "meetings", path: "/meetings", label: "Meetings" },
+  { key: "search", path: "/search", label: "Search" },
   { key: "speakers", path: "/people", label: "People" },
   { key: "templates", path: "/templates", label: "Templates" },
   { key: "logs", path: "/logs", label: "Logs" },
@@ -424,6 +430,12 @@ const TAB_ICON_CONTENT: Record<TabKey, ReactNode> = {
     <>
       <rect x="3" y="4" width="18" height="18" rx="2" />
       <path d="M16 2v4M8 2v4M3 10h18" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
     </>
   ),
   speakers: (
@@ -648,7 +660,7 @@ export function App(): ReactElement {
         aria-label="Primary"
         className="dock dock-md z-30 pb-safe sm:hidden"
       >
-        {(NAV_TABS.filter((t) => t.key === "meetings" || t.key === "speakers" || t.key === "templates" || t.key === "usage")).map((tab) => {
+        {(NAV_TABS.filter((t) => t.key === "meetings" || t.key === "search" || t.key === "speakers" || t.key === "templates" || t.key === "usage")).map((tab) => {
           const active = isTabActive(tab.key);
           return (
             <button
@@ -730,6 +742,8 @@ export function App(): ReactElement {
           />
         ) : activeTab === "usage" ? (
           <UsageView onSelectMeeting={(id) => navigate(`/meetings/${id}`)} />
+        ) : activeTab === "search" ? (
+          <SearchView onNavigate={navigate} />
         ) : activeTab === "insights" ? (
           <InsightsView onNavigate={navigate} speakers={knownSpeakers.map((s) => ({ id: s.id, name: s.name }))} />
         ) : activeTab === "groups" ? (
@@ -2647,7 +2661,15 @@ function MeetingDetailView({
   const focusSegmentIndex = useMemo(() => {
     if (!focus || parsedTranscriptSegments.length === 0) return null;
     const containing = parsedTranscriptSegments.findIndex((s) => focus.ms >= s.startMs && focus.ms < s.endMs);
-    if (containing >= 0) return containing;
+    if (containing >= 0) {
+      // Global search links to the start of a multi-segment chunk; land on the segment that holds the match.
+      const needle = focus.quote?.toLowerCase();
+      if (needle) {
+        const hit = parsedTranscriptSegments.slice(containing, containing + 40).findIndex((s) => s.text.toLowerCase().includes(needle));
+        if (hit >= 0) return containing + hit;
+      }
+      return containing;
+    }
     let before = -1;
     parsedTranscriptSegments.forEach((s, i) => {
       if (s.startMs <= focus.ms) before = i;

@@ -27,6 +27,7 @@ from ..logging_db import Logger
 from ..logging_db import logger as default_logger
 from ..ml.opus import is_raw_plaud_opus, wrap_raw_opus_bytes
 from ..schemas import EnrolledSpeaker, Transcript, TranscriptSegment
+from ..services.search import safe_reindex
 from ..speaker_labels import is_generic_speaker_label
 from .retry import (
     compute_retry_delay_ms,
@@ -936,6 +937,7 @@ class PlaudPoller:
                 {"id": meeting["id"]},
             )
 
+        safe_reindex(self.db, meeting["id"], self.meetings_dir)
         always, when_unnamed = self._resolve_plaud_retranscribe_flags()
         has_only_generic = not segments or all(is_generic_plaud_speaker(s.get("speaker")) for s in segments)
         # No transcript segments (e.g. Plaud minutes exhausted mid-flow,

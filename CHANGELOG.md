@@ -8,6 +8,12 @@ day its changes merged (`## [YYYY-MM-DD]`), with entries grouped under
 `Added` / `Changed` / `Fixed` — pushing a tag publishes the image and turns
 every section newer than the previous tag into the GitHub release notes.
 
+## [2026-10-23]
+
+### Added
+
+- **Search all meetings** — a new Search tab finds text across every recording at once: meeting titles, transcripts, summaries and insight moments. Results are ranked by relevance, grouped by meeting with highlighted excerpts, and clicking a transcript or moment hit opens the meeting at that point in the transcript. Search runs locally (no AI calls) and stays up to date as meetings are transcribed, summarized, analyzed, renamed or deleted. Existing meetings are indexed once with `olive reindex-search`.
+
 ## [2026-10-22]
 
 ### Added

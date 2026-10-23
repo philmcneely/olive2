@@ -121,8 +121,9 @@ def test_insights_tables_columns_and_indexes_exist_and_are_idempotent() -> None:
         "idx_moments_start",
         "idx_speaker_aliases",
     } <= indexes
-    # No FTS or per-turn exchange tables belong to this phase.
-    assert not any("fts" in t.lower() or t == "exchanges" for t in tables)
+    # No insights FTS or per-turn exchange tables belong to this phase
+    # (the global search index, ``search_*``, is a separate feature).
+    assert not any(("fts" in t.lower() and not t.startswith("search_")) or t == "exchanges" for t in tables)
     # Schema is built from the in-code statement lists; no new alembic revision.
     assert version == ["0001_baseline"]
 

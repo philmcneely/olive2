@@ -30,6 +30,7 @@ from ...layout import meeting_paths
 from ...logging_db import logger
 from ...schemas import LlmGenerateResult, TranscriptSegment
 from ...settings import AppConfig, resolve_paths
+from ..search import safe_reindex
 from .chunking import chunk_segments, dedup_moments, format_turn
 from .identity import ResolvedIdentity, normalize_alias, resolve_labels
 from .prompts import (
@@ -816,6 +817,7 @@ class InsightsService:
                 (Path(folder) / stale_path).unlink(missing_ok=True)
 
         self._record_usage(meeting_id, transcript_hash, prompt_version, usage_log, now)
+        safe_reindex(self.db, meeting_id, self.meetings_dir)
         logger.info(
             "Extracted insights for meeting",
             {
