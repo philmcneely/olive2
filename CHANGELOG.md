@@ -8,6 +8,12 @@ day its changes merged (`## [YYYY-MM-DD]`), with entries grouped under
 `Added` / `Changed` / `Fixed` — pushing a tag publishes the image and turns
 every section newer than the previous tag into the GitHub release notes.
 
+## [2026-10-23]
+
+### Fixed
+
+- **Plaud transcripts for audio-only recordings** — recordings that were imported before Plaud had transcribed them now get their Plaud transcript once you transcribe them in the Plaud app. Olive re-checks them automatically on each sync (in small batches), and `POST /api/plaud/backfill-transcripts` drains the whole backlog at once.
+
 ## [2026-10-22]
 
 ### Added

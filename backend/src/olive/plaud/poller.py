@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import re
 import time
 import urllib.parse
@@ -296,6 +297,18 @@ def _is_plaud_deleted(conn: Any, file_id: str, canonical_id: str) -> bool:
         return False
 
 
+def _int_option(value: Any, env_name: str, default: int) -> int:
+    """Resolve an int setting from an explicit option, then the environment, then a default."""
+    for raw in (value, os.environ.get(env_name)):
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
 class PlaudPoller:
     def __init__(self, options: dict[str, Any] | None = None, **kwargs: Any) -> None:
         opts = {**(options or {}), **kwargs}
@@ -353,6 +366,10 @@ class PlaudPoller:
         self.page_size: int = int(opts.get("pageSize") or DEFAULT_PAGE_SIZE)
         self.pcs_wait_ms: int = int(opts.get("pcsWaitMs") or DEFAULT_PCS_WAIT_MS)
         self.retry_options: dict[str, Any] = dict(opts.get("retryOptions") or {})
+        self.backfill_batch: int = _int_option(opts.get("plaudBackfillBatch"), "OLIVE_PLAUD_BACKFILL_BATCH", 25)
+        self.backfill_cooldown_ms: int = _int_option(
+            opts.get("plaudBackfillCooldownMs"), "OLIVE_PLAUD_BACKFILL_COOLDOWN_MS", 21_600_000
+        )
 
         self._scheduler: AsyncIOScheduler | None = None
         self._in_flight: asyncio.Task[dict[str, Any]] | None = None
@@ -509,6 +526,7 @@ class PlaudPoller:
         discovery_error: str | None = None
         discovered = 0
         resolved = 0
+        backfilled = 0
         error: str | None = None
 
         try:
@@ -523,6 +541,17 @@ class PlaudPoller:
             resolution_res = await self._fetch_pending_assets()
             resolved = resolution_res["resolved"]
             error = resolution_res["error"]
+            if self.backfill_batch > 0:
+                try:
+                    bf = await self.backfill_plaud_transcripts(
+                        limit=self.backfill_batch, cooldown_ms=self.backfill_cooldown_ms
+                    )
+                    backfilled = int(bf.get("upgraded", 0))
+                except Exception as bf_err:
+                    self.logger.warn(
+                        "Plaud transcript backfill pass failed",
+                        {"category": "plaud", "error": str(bf_err)},
+                    )
             self.logger.debug(
                 "Plaud polling cycle finished",
                 {
@@ -548,6 +577,7 @@ class PlaudPoller:
             "discoveryError": discovery_error,
             "discovered": discovered,
             "resolved": resolved,
+            "backfilled": backfilled,
             "pcsPending": pcs_pending,
             "startedAt": started_at,
             "completedAt": completed_at,
@@ -978,8 +1008,11 @@ class PlaudPoller:
                 {"now": resolved_at, "id": meeting["id"]},
             )
             conn.execute(
-                text("UPDATE plaud_ingest_state SET pcs_resolved = 1 WHERE meeting_id = :id"),
-                {"id": meeting["id"]},
+                text(
+                    "UPDATE plaud_ingest_state SET pcs_resolved = 1, backfill_checked_at = :now "
+                    "WHERE meeting_id = :id"
+                ),
+                {"id": meeting["id"], "now": resolved_at},
             )
 
         self._hand_off_transcription(meeting["id"], "audio-only Plaud meeting")
@@ -1767,6 +1800,110 @@ class PlaudPoller:
             )
             summary["error"] = str(exc)
             return summary
+
+    async def backfill_plaud_transcripts(
+        self, limit: int = 200, cooldown_ms: int | None = None
+    ) -> dict[str, Any]:
+        """Pull Plaud transcripts for meetings that were ingested audio-only.
+
+        Once the PCS wait deadline passes, a recording with no transcript is
+        resolved audio-only and the poller never looks at it again. If the user
+        transcribes it in the Plaud app later, this re-checks Plaud and ingests
+        the transcript. Each row is stamped ``backfill_checked_at`` so a
+        never-transcribed recording is not re-fetched until ``cooldown_ms``
+        has passed (``None`` disables the cooldown filter).
+        """
+        summary: dict[str, Any] = {"checked": 0, "upgraded": 0, "stillPending": 0, "missing": 0, "errors": 0}
+        get_file_fn = getattr(self.client, "get_file", None) or getattr(self.client, "getFile", None)
+        if not callable(get_file_fn):
+            return summary
+
+        query = (
+            "SELECT p.meeting_id AS meeting_id FROM meetings m "
+            "JOIN plaud_ingest_state p ON p.meeting_id = m.id "
+            "WHERE m.source = 'plaud' AND m.status = 'ready' AND m.primary_transcript_artifact_id IS NULL "
+            "AND p.pcs_resolved = 1 AND p.duplicate_of_meeting_id IS NULL "
+        )
+        params: dict[str, Any] = {"lim": max(1, int(limit))}
+        if cooldown_ms is not None:
+            query += "AND (p.backfill_checked_at IS NULL OR p.backfill_checked_at <= :cutoff) "
+            params["cutoff"] = self.now() - int(cooldown_ms)
+        query += "ORDER BY m.start_time DESC LIMIT :lim"
+
+        with self.db.connect() as conn:
+            meeting_ids = [str(r["meeting_id"]) for r in conn.execute(text(query), params).mappings().all()]
+
+        for meeting_id in meeting_ids:
+            try:
+                with self.db.connect() as conn:
+                    meeting = (
+                        conn.execute(text("SELECT * FROM meetings WHERE id = :id"), {"id": meeting_id})
+                        .mappings()
+                        .first()
+                    )
+                    state = (
+                        conn.execute(
+                            text("SELECT * FROM plaud_ingest_state WHERE meeting_id = :id"),
+                            {"id": meeting_id},
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    if not meeting or not state:
+                        continue
+                    file_id = str(state["plaud_file_id"])
+                    if _is_plaud_deleted(conn, file_id, canonical_plaud_file_id(file_id)):
+                        continue
+                summary["checked"] += 1
+                with self.db.begin() as conn:
+                    conn.execute(
+                        text("UPDATE plaud_ingest_state SET backfill_checked_at = :now WHERE meeting_id = :id"),
+                        {"now": self.now(), "id": meeting_id},
+                    )
+                try:
+                    detail, effective_file_id = await self._fetch_plaud_detail(get_file_fn, file_id)
+                except NotFoundError as missing:
+                    await self._mark_file_missing(meeting, state, missing)
+                    summary["missing"] += 1
+                    continue
+                # Only a real transcript counts: a summary-only payload would be
+                # re-ingested (and re-handed to local transcription) every cooldown.
+                if _content_is_ready(detail) and parse_transcript_segments(detail.get("source_list")):
+                    await self._ingest_ready_meeting(
+                        meeting, {**state, "plaud_file_id": effective_file_id}, detail
+                    )
+                    summary["upgraded"] += 1
+                else:
+                    summary["stillPending"] += 1
+            except Exception as exc:
+                summary["errors"] += 1
+                self.logger.warn(
+                    "Plaud transcript backfill skipped a meeting",
+                    {"category": "plaud", "meetingId": meeting_id, "error": str(exc)},
+                )
+        if summary["upgraded"]:
+            self.logger.info("Plaud transcript backfill upgraded meetings", {"category": "plaud", **summary})
+        return summary
+
+    async def enqueue_transcript_backfill(self, limit: int = 500) -> dict[str, Any]:
+        """Queue a full (cooldown-free) transcript backfill on the plaud_sync queue."""
+        from ..workflows import (
+            QUEUE_PLAUD_SYNC,
+            enqueue_stage_job,
+            ensure_dbos_launched_async,
+        )
+
+        await ensure_dbos_launched_async(
+            config_dir=self.config_dir or None,
+            meetings_dir=self.meetings_dir or None,
+        )
+        await enqueue_stage_job(
+            QUEUE_PLAUD_SYNC,
+            lambda: self.backfill_plaud_transcripts(limit, cooldown_ms=0),
+            deduplication_id="plaud-backfill-transcripts",
+            label="plaud-backfill-transcripts",
+        )
+        return {"status": "queued"}
 
     async def _pending_count(self) -> int:
         with self.db.connect() as conn:

@@ -2885,6 +2885,11 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
             status_code=202,
         )
 
+    @app.post("/api/plaud/backfill-transcripts")
+    async def post_plaud_backfill_transcripts_route() -> JSONResponse:
+        result = await _call_maybe_async(get_plaud_poller(), ("enqueue_transcript_backfill",))
+        return JSONResponse(result, status_code=202)
+
     @app.post("/api/plaud/auth/start")
     async def post_plaud_auth_start_route() -> JSONResponse:
         try:

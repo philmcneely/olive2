@@ -276,6 +276,7 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("stage_runs", "finished_at", "INTEGER"),
     ("plaud_ingest_state", "pcs_resolved", "INTEGER NOT NULL DEFAULT 0"),
     ("plaud_ingest_state", "duplicate_of_meeting_id", "TEXT REFERENCES meetings(id)"),
+    ("plaud_ingest_state", "backfill_checked_at", "INTEGER"),
     ("meeting_speakers", "identity_source", "TEXT"),
     ("meeting_speakers", "identity_confidence", "REAL"),
     ("meeting_speaker_name_proposals", "evidence_type", "TEXT"),
