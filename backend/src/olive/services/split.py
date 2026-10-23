@@ -22,6 +22,7 @@ from sqlalchemy.engine import Engine
 
 from ..layout import ensure_meeting_folder, meeting_paths
 from .meetings import to_meeting
+from .search import safe_reindex
 
 MIN_EDGE_MARGIN_MS = 5_000
 
@@ -602,4 +603,6 @@ def split_meeting(db: Engine, meetings_dir: str, meeting_id: str, split_ms: int)
         )
 
     assert updated_a and created_b
+    safe_reindex(db, meeting_id, meetings_dir)
+    safe_reindex(db, new_meeting_id, meetings_dir)
     return {"meeting": to_meeting(updated_a).model_dump(), "newMeeting": to_meeting(created_b).model_dump()}

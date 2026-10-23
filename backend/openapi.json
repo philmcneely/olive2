@@ -59,6 +59,39 @@
         }
       }
     },
+    "/api/search": {
+      "get": {
+        "summary": "Get Search Route",
+        "operationId": "get_search_route_api_search_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search/reindex": {
+      "post": {
+        "summary": "Post Search Reindex Route",
+        "description": "Index a bounded batch of meetings that are not indexed yet (one-time populate).",
+        "operationId": "post_search_reindex_route_api_search_reindex_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ingest": {
       "post": {
         "summary": "Post Ingest Route",
@@ -7716,6 +7749,99 @@
           "meetingId"
         ],
         "title": "TranscriptImportResult",
+        "type": "object"
+      },
+      "SearchHit": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "title",
+              "transcript",
+              "summary",
+              "moment"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "startMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Startms"
+          }
+        },
+        "required": [
+          "kind",
+          "snippet"
+        ],
+        "title": "SearchHit",
+        "type": "object"
+      },
+      "SearchMeetingResult": {
+        "properties": {
+          "meetingId": {
+            "title": "Meetingid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "startTime": {
+            "title": "Starttime",
+            "type": "integer"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hits",
+          "meetingId",
+          "startTime",
+          "title"
+        ],
+        "title": "SearchMeetingResult",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchMeetingResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query",
+          "results",
+          "total"
+        ],
+        "title": "SearchResponse",
         "type": "object"
       }
     }

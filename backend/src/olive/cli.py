@@ -125,5 +125,20 @@ def insights_name_cmd(
         typer.echo(f"  {err['meetingId']}: {err['error']}", err=True)
 
 
+@app.command("reindex-search")
+def reindex_search_cmd(
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum meetings to index this run"),
+) -> None:
+    """Build the global search index for meetings that are not indexed yet (one-time populate)."""
+    from .db import get_db
+    from .services.search import backfill
+
+    paths = resolve_paths()
+    if not Path(paths.database_path).exists():
+        typer.echo(f"Error: database not found at {paths.database_path}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Indexed {backfill(get_db(), paths.meetings_dir, limit)} meetings")
+
+
 if __name__ == "__main__":
     app()

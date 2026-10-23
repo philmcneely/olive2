@@ -10,6 +10,10 @@ every section newer than the previous tag into the GitHub release notes.
 
 ## [2026-10-23]
 
+### Added
+
+- **Search all meetings** — a new Search tab finds text across every recording at once: meeting titles, transcripts, summaries and insight moments. Results are ranked by relevance, grouped by meeting with highlighted excerpts, and clicking a transcript or moment hit opens the meeting at that point in the transcript. Search runs locally (no AI calls) and stays up to date as meetings are transcribed, summarized, analyzed, renamed or deleted. Existing meetings are indexed once with `olive reindex-search`.
+
 ### Fixed
 
 - **Plaud transcripts for audio-only recordings** — recordings that were imported before Plaud had transcribed them now get their Plaud transcript once you transcribe them in the Plaud app. Olive re-checks them automatically on each sync (in small batches), and `POST /api/plaud/backfill-transcripts` drains the whole backlog at once.

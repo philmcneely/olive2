@@ -34,6 +34,9 @@ from .services.meetings import (
     update_meeting_tags,
     update_meeting_title,
 )
+from .services.search import DEFAULT_LIMIT as DEFAULT_SEARCH_LIMIT
+from .services.search import backfill as search_backfill
+from .services.search import search as search_meetings
 from .services.templates import TemplateService
 from .settings import (
     OlivePaths,
@@ -755,6 +758,34 @@ def create_app(options: dict[str, Any] | None = None, **kwargs: Any) -> FastAPI:
     @app.get("/api/tags")
     async def get_tags_route() -> JSONResponse:
         return JSONResponse({"tags": list_tags(db)})
+
+    @app.get("/api/search")
+    async def get_search_route(request: Request) -> JSONResponse:
+        q = request.query_params
+        limit = _numeric_query_param(q.get("limit"))
+        kinds = [k.strip() for k in (q.get("kinds") or "").split(",") if k.strip()]
+        res = await asyncio.to_thread(
+            search_meetings,
+            db,
+            q.get("q") or "",
+            limit=limit if limit is not None else DEFAULT_SEARCH_LIMIT,
+            kinds=kinds,
+        )
+        return JSONResponse(res)
+
+    @app.post("/api/search/reindex")
+    async def post_search_reindex_route(request: Request) -> JSONResponse:
+        """Index a bounded batch of meetings that are not indexed yet (one-time populate)."""
+        batch = min(max(_numeric_query_param(request.query_params.get("limit")) or 50, 1), 500)
+        indexed = await asyncio.to_thread(search_backfill, db, meetings_dir, batch)
+        with db.connect() as conn:
+            pending = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM meetings m LEFT JOIN search_index_state s ON s.meeting_id = m.id "
+                    "WHERE s.meeting_id IS NULL"
+                )
+            ).scalar_one()
+        return JSONResponse({"indexed": indexed, "pending": int(pending)})
 
     @app.post("/api/ingest")
     async def post_ingest_route(request: Request) -> JSONResponse:
@@ -3315,6 +3346,9 @@ def export_openapi_schema() -> dict[str, Any]:
         s.InsightGroupCompareDefault,
         s.InsightGroupCompareDefaultCoverage,
         s.TranscriptImportResult,
+        s.SearchHit,
+        s.SearchMeetingResult,
+        s.SearchResponse,
     ]
     for model_cls in domain_models:
         json_schema = model_cls.model_json_schema(

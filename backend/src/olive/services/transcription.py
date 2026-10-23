@@ -62,6 +62,7 @@ from ..workflows import (
     ensure_dbos_launched_async,
     get_dbos_active_progress_map,
 )
+from .search import safe_reindex
 
 STAGE_SPEECHMATICS_TRANSCRIBE = "speechmatics_transcribe"
 STAGE_ASSEMBLYAI_TRANSCRIBE = "assemblyai_transcribe"
@@ -1685,6 +1686,7 @@ class TranscriptionService:
                     {"now": completed_at, "id": stage_run_id},
                 )
 
+            safe_reindex(self.db, meeting["id"], self.meetings_dir)
             asyncio.create_task(self._enqueue_auto_summarize(meeting["id"]))
             asyncio.create_task(self._enqueue_insights(meeting["id"]))
 
@@ -1871,6 +1873,7 @@ class TranscriptionService:
                 ),
                 {"now": now, "mid": meeting_id, "stage": STAGE_LOCAL_TRANSCRIBE},
             )
+        safe_reindex(self.db, meeting_id, self.meetings_dir)
         self.emit_progress(
             meeting_id,
             {"stage": "done", "percent": 100, "message": "Transcription completed successfully."},
@@ -2554,6 +2557,7 @@ class TranscriptionService:
                 {"now": completed_at, "id": stage_run_id},
             )
 
+        safe_reindex(self.db, meeting["id"], self.meetings_dir)
         asyncio.create_task(self._enqueue_auto_summarize(meeting["id"]))
         asyncio.create_task(self._enqueue_insights(meeting["id"]))
 

@@ -227,11 +227,28 @@ CREATE_TABLE_STATEMENTS: list[str] = [
     meeting_ids TEXT NOT NULL,
     reason TEXT
   )""",
+    # Bookkeeping for the global search index: which meetings are indexed and
+    # the (contiguous) rowid range their rows occupy in search_fts, so a
+    # reindex deletes by rowid instead of scanning the FTS table.
+    """CREATE TABLE IF NOT EXISTS search_index_state (
+    meeting_id TEXT PRIMARY KEY,
+    first_rowid INTEGER,
+    last_rowid INTEGER,
+    indexed_at INTEGER NOT NULL
+  )""",
     """CREATE TABLE IF NOT EXISTS alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
   )""",
 ]
+
+SEARCH_FTS_STATEMENT = """CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+    meeting_id UNINDEXED,
+    kind UNINDEXED,
+    start_ms UNINDEXED,
+    text,
+    tokenize = 'unicode61 remove_diacritics 2'
+  )"""
 
 CREATE_INDEX_STATEMENTS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_meetings_start_time ON meetings(start_time DESC)",
@@ -491,6 +508,12 @@ def _run_migrations_sqlite(conn: sqlite3.Connection) -> None:
 
     for statement in CREATE_TABLE_STATEMENTS:
         conn.execute(statement)
+
+    try:
+        conn.execute(SEARCH_FTS_STATEMENT)
+    except sqlite3.OperationalError:
+        # SQLite built without FTS5: global search degrades to "no results".
+        pass
 
     for table, column, definition in ADDITIVE_COLUMNS:
         _add_column_if_missing(conn, table, column, definition)
