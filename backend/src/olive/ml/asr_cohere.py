@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,7 @@ class CohereAsrEngine:
         language: str = "en",
         start_ms: int = 0,
         strict: bool = False,
+        on_chunk: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
         arr = np.asarray(samples, dtype=np.float32)
         if arr.ndim > 1:
@@ -273,13 +275,19 @@ class CohereAsrEngine:
             # Chunk audio in 30s windows with 0s overlap
             chunk_samples = 30 * 16000
             texts: list[str] = []
-            for offset in range(0, len(arr), chunk_samples):
+            total_chunks = -(-len(arr) // chunk_samples)
+            for idx, offset in enumerate(range(0, len(arr), chunk_samples), start=1):
                 sub = arr[offset : offset + chunk_samples]
-                if len(sub) < 800:
-                    continue
-                t = self._transcribe_chunk_int8_sync(sub, language=language)
-                if t:
-                    texts.append(t)
+                if len(sub) >= 800:
+                    t = self._transcribe_chunk_int8_sync(sub, language=language)
+                    if t:
+                        texts.append(t)
+                if on_chunk is not None:
+                    # Liveness signal for the caller's stall watchdog; must never fail ASR.
+                    try:
+                        on_chunk(idx, total_chunks)
+                    except Exception:
+                        pass
             full_text = " ".join(texts).strip()
             words = proportional_word_timestamps(full_text, start_ms, duration_ms)
             return {
@@ -327,6 +335,7 @@ class CohereAsrEngine:
 
         language = str(opts.get("language") or self.language or "en")
         strict = bool(opts.get("strict"))
+        on_chunk = opts.get("onChunk")
         return await asyncio.to_thread(
             self._transcribe_sync,
             arr,
@@ -334,6 +343,7 @@ class CohereAsrEngine:
             language,
             start_ms,
             strict,
+            on_chunk if callable(on_chunk) else None,
         )
 
     transcribeSegment = transcribe_segment

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -543,3 +544,138 @@ async def test_recovered_driver_installs_stall_supervision(monkeypatch: pytest.M
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
     assert tw.get_task_context("rob-recovered") is None  # supervision torn down
+
+
+# --- ASR liveness: per-chunk progress so a long whole-file ASR is not stall-cancelled ----
+
+
+def test_cohere_transcribe_sync_reports_chunk_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    import numpy as np
+
+    from olive.ml.asr_cohere import CohereAsrEngine
+
+    engine = CohereAsrEngine()
+    monkeypatch.setattr(engine, "_transcribe_chunk_int8_sync", lambda sub, language="en": "word")
+    seen: list[tuple[int, int]] = []
+    audio = np.zeros(16000 * 70, dtype=np.float32)  # 70s -> three 30s windows
+    engine._transcribe_sync(audio, 16000, "en", 0, False, lambda done, total: seen.append((done, total)))
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+async def test_whole_file_asr_emits_progress_so_watch_does_not_trip(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A whole-file ASR far longer than the stall window used to emit ONE progress event
+    # then go silent, so the watchdog killed it. Chunk progress from the worker thread
+    # must keep the watch fed for as long as the engine is making headway.
+    import json as _json
+
+    import numpy as np
+
+    from olive.ml.asr_cohere import CohereAsrEngine
+    from olive.ml.audio import encode_wav
+
+    monkeypatch.setattr(tw, "is_shutting_down", lambda: False)
+    task_id = "rob-asr-heartbeat"
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(encode_wav(np.zeros(1600, dtype=np.float32), 16000))
+    diar = tmp_path / "diar.json"
+    diar.write_text(_json.dumps({"turns": [{"speakerId": "S1", "startMs": 0, "endMs": 100}]}))
+
+    class _SlowChunkedAsr(CohereAsrEngine):
+        def __init__(self) -> None:  # no model load
+            pass
+
+    class _Pipe:
+        asr_engine = _SlowChunkedAsr()
+        aligner = object()
+        unload_per_stage = False
+
+        async def _call_asr_segment(self, samples: object, sr: int, options: dict[str, object]) -> dict[str, str]:
+            def _work() -> None:
+                for i in range(1, 9):  # 8 chunks x 0.15s = 1.2s >> 0.4s stall window
+                    time.sleep(0.15)
+                    options["onChunk"](i, 8)  # type: ignore[operator]
+
+            await asyncio.to_thread(_work)
+            return {"text": "hello"}
+
+    ctx = tw.TaskExecutionContext(task_id=task_id, meeting_id=None, pipeline=_Pipe())  # type: ignore[arg-type]
+    tw.register_task_context(ctx)
+    watch = tw._install_stall_watch(ctx, 0.4)
+    watch.start()
+    try:
+        payload = {
+            "taskId": task_id,
+            "meetingId": None,
+            "workDir": str(tmp_path),
+            "wholeFileAsr": True,
+            "language": "en",
+        }
+        decode_info = {"wavPath": str(wav), "durationMs": 100, "sampleRate": 16000}
+        res = await tw.step_transcribe_asr(payload, decode_info, {"diarizationPath": str(diar)})
+        assert res["mode"] == "whole_file"
+        assert not watch.tripped  # liveness was visible the whole time
+    finally:
+        watch.cancel()
+        tw.unregister_task_context(task_id)
+
+
+# --- Fix: re-transcribe must not dedup onto a dead (cancelled) child workflow id ----------
+
+
+async def test_retranscribe_uses_fresh_child_workflow_id_per_attempt(tmp_path) -> None:
+    from sqlalchemy import text
+
+    from olive.db import create_db
+    from olive.layout import meeting_paths
+    from olive.services.transcription import TranscriptionService
+
+    handle = create_db(":memory:")
+    meetings_dir = str(tmp_path / "meetings")
+    now = 1_700_000_000_000
+    mid = "m-retry"
+    paths = meeting_paths(meetings_dir, now, "Retry", mid)
+    from pathlib import Path
+
+    Path(paths.audio_dir).mkdir(parents=True, exist_ok=True)
+    (Path(paths.folder) / "audio/meeting.wav").write_bytes(b"RIFF")
+    with handle.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO meetings (id, title, start_time, end_time, source, status, tags, "
+                "created_at, updated_at) VALUES (:id, 'Retry', :n, :e, 'upload', 'ready', '[]', :n, :n)"
+            ),
+            {"id": mid, "n": now, "e": now + 1000},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO recordings (id, meeting_id, path, mime, duration_ms, size_bytes, sha256, "
+                "provider, created_at) VALUES ('r1', :m, 'audio/meeting.wav', 'audio/wav', 1000, 4, "
+                "'x', 'upload', :n)"
+            ),
+            {"m": mid, "n": now},
+        )
+
+    seen_ids: list[str] = []
+
+    class _FailingPipeline:
+        async def transcribe(self, opts: dict[str, object]) -> object:
+            seen_ids.append(str(opts["workflow_id"]))
+            raise RuntimeError("cancelled: stalled")  # a cancelled/terminal child
+
+    svc = TranscriptionService(
+        {
+            "db": handle.engine,
+            "meetingsDir": meetings_dir,
+            "localPipeline": _FailingPipeline(),
+            "defaultProvider": "local",
+            "now": lambda: now + 1,
+        }
+    )
+    for _ in range(2):
+        with contextlib.suppress(Exception):
+            await svc.transcribe_meeting(mid, {"provider": "local"})
+    assert len(seen_ids) == 2
+    assert seen_ids[0] != seen_ids[1]  # same id => DBOS dedups onto the cancelled workflow
+    assert all(i.startswith("local-") for i in seen_ids)
