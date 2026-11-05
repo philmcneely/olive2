@@ -1088,10 +1088,35 @@ async def step_transcribe_asr(
                     "message": "Transcribing audio with Cohere Transcribe...",
                 },
             )
+            # The engine transcribes the whole file in one long worker-thread call; without
+            # a liveness signal the stall watchdog sees a single "50%" and then silence,
+            # and cancels any file whose ASR outlasts the stall window. The engine reports
+            # each finished chunk (from its thread), which we forward as progress, so only
+            # a genuinely wedged chunk still trips the watchdog.
+            loop = asyncio.get_running_loop()
+
+            def _on_asr_chunk(done: int, total: int) -> None:
+                pct = 50 + int(30 * done / max(1, total))
+                coro = _emit_progress(
+                    task_id,
+                    {
+                        "stage": "transcribing",
+                        "percent": pct,
+                        "current": 1,
+                        "total": total_segments,
+                        "totalMs": duration_ms,
+                        "message": f"Transcribing audio with Cohere Transcribe ({done}/{total} chunks)...",
+                    },
+                )
+                try:
+                    asyncio.run_coroutine_threadsafe(coro, loop)
+                except RuntimeError:  # loop closed (shutdown): progress is best-effort
+                    coro.close()
+
             full_asr = await pipe._call_asr_segment(
                 samples,
                 target_sr,
-                {"language": language, "startMs": 0, "modelId": model_id},
+                {"language": language, "startMs": 0, "modelId": model_id, "onChunk": _on_asr_chunk},
             )
             if pipe.unload_per_stage and hasattr(pipe.asr_engine, "release"):
                 pipe.asr_engine.release()

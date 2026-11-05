@@ -1614,7 +1614,11 @@ class TranscriptionService:
                     "now_fn": self.now,
                     "configDir": self.config_dir,
                     "meetingsDir": self.meetings_dir,
-                    "workflow_id": f"local-{stage_run_id[:8]}",
+                    # Unique per attempt: DBOS caches a CANCELLED/terminal workflow under its
+                    # id and dedups every later submit of that id onto the dead run (a silent
+                    # no-op). The stable `local-<stage_run_id[:8]>` stays as provider_job_id;
+                    # the suffix keeps id->meeting resolution (rsplit on "-") working.
+                    "workflow_id": f"local-{stage_run_id[:8]}-{uuid.uuid4().hex[:8]}",
                 }
             )
             transcript: Transcript = (
