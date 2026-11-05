@@ -42,6 +42,7 @@ from ..speaker_labels import is_generic_speaker_label
 from .insights.identity import normalize_alias
 from .insights.naming import SpeakerNamingService
 from .insights.prompts import load_insights_config
+from .search import safe_reindex
 from .transcript_parsers import ImportFormat, parse_transcript
 
 TRANSCRIPT_JSON_REL = "transcripts/import.json"
@@ -264,6 +265,7 @@ class TranscriptImportService:
             raise
 
         warnings = list(parsed.warnings)
+        safe_reindex(self.db, meeting_id, self.meetings_dir)
         logger.info(
             "Transcript imported",
             {

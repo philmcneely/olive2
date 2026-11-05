@@ -55,6 +55,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Search Route */
+        get: operations["get_search_route_api_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Search Reindex Route
+         * @description Index a bounded batch of meetings that are not indexed yet (one-time populate).
+         */
+        post: operations["post_search_reindex_route_api_search_reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingest": {
         parameters: {
             query?: never;
@@ -3624,6 +3661,41 @@ export interface components {
              */
             timingSynthetic: boolean | null;
         };
+        /** SearchHit */
+        SearchHit: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "title" | "transcript" | "summary" | "moment";
+            /** Snippet */
+            snippet: string;
+            /**
+             * Startms
+             * @default null
+             */
+            startMs: number | null;
+        };
+        /** SearchMeetingResult */
+        SearchMeetingResult: {
+            /** Meetingid */
+            meetingId: string;
+            /** Title */
+            title: string;
+            /** Starttime */
+            startTime: number;
+            /** Hits */
+            hits: components["schemas"]["SearchHit"][];
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Query */
+            query: string;
+            /** Results */
+            results: components["schemas"]["SearchMeetingResult"][];
+            /** Total */
+            total: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -3676,6 +3748,46 @@ export interface operations {
         };
     };
     get_tags_route_api_tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_search_route_api_search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    post_search_reindex_route_api_search_reindex_post: {
         parameters: {
             query?: never;
             header?: never;

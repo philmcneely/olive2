@@ -14,6 +14,7 @@ import torch
 import torchaudio.compliance.kaldi as kaldi
 from huggingface_hub import hf_hub_download
 
+from ..logging_db import logger
 from ..settings import get_effective_hf_token
 from .audio import resample
 from .model_store import WESPEAKER_FILENAME, WESPEAKER_REPO_ID
@@ -150,7 +151,18 @@ class WeSpeakerEmbeddingExtractor:
             ort_out: Any = sess.run(None, {self._input_name: feat_np})
             raw_emb = np.asarray(ort_out[0])[0]
             return normalize_vector(raw_emb)
-        except Exception:
+        except Exception as exc:
+            # Keep the zero-vector contract (callers treat it as "no voiceprint"),
+            # but never fail silently: a zero vector scores 0.0 against everyone.
+            logger.error(
+                "WeSpeaker embedding failed; returning zero vector",
+                {
+                    "category": "transcription",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "samples": int(arr.size),
+                    "modelPath": self.model_path,
+                },
+            )
             return [0.0] * self._dim
 
     async def extract(

@@ -23,6 +23,7 @@ from ..schemas import (
     StageRunRow,
 )
 from ..speaker_labels import is_generic_speaker_label
+from .search import fts_available, remove_rows, safe_reindex
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
@@ -513,6 +514,7 @@ def update_meeting_title(
                 pass
         raise
 
+    safe_reindex(db, meeting_id, meetings_dir)
     return to_meeting(updated_row) if updated_row else None
 
 
@@ -912,6 +914,8 @@ def delete_meeting(db: Engine, meeting_id: str, meetings_dir: str | None = None)
         ]:
             conn.execute(text(f"DELETE FROM {tbl} WHERE meeting_id = :id"), {"id": meeting_id})
         conn.execute(text("DELETE FROM meetings WHERE id = :id"), {"id": meeting_id})
+        if fts_available(conn):
+            remove_rows(conn, meeting_id)
 
     if meetings_dir:
         folder = Path(

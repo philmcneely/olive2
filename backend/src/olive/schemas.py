@@ -651,6 +651,30 @@ class LogListResponse(CamelModel):
     categories: list[str]
 
 
+SearchHitKind = Literal["title", "transcript", "summary", "moment"]
+
+
+class SearchHit(CamelModel):
+    kind: SearchHitKind
+    # Excerpt with matches wrapped in \u0002 (open) / \u0003 (close) control
+    # characters, so clients can highlight without rendering transcript text as HTML.
+    snippet: str
+    startMs: int | None = None
+
+
+class SearchMeetingResult(CamelModel):
+    meetingId: str
+    title: str
+    startTime: int
+    hits: list[SearchHit]
+
+
+class SearchResponse(CamelModel):
+    query: str
+    results: list[SearchMeetingResult]
+    total: int
+
+
 UsageKind = Literal["transcription", "summary", "chat", "title"]
 
 

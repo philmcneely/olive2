@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import re
 import time
 import urllib.parse
@@ -27,6 +28,7 @@ from ..logging_db import Logger
 from ..logging_db import logger as default_logger
 from ..ml.opus import is_raw_plaud_opus, wrap_raw_opus_bytes
 from ..schemas import EnrolledSpeaker, Transcript, TranscriptSegment
+from ..services.search import safe_reindex
 from ..speaker_labels import is_generic_speaker_label
 from .retry import (
     compute_retry_delay_ms,
@@ -211,24 +213,35 @@ def plaud_segments_to_transcript(
     a seconds reading, values are scaled by 1000. Per-value heuristics are
     deliberately avoided so genuine sub-second millisecond timestamps survive.
 
+    ``transcripts/plaud.json`` on disk may instead hold the normalized
+    ``{startMs, endMs, speaker, text}`` shape (the same one
+    ``services.transcription._parse_stored_transcript`` accepts). Those keys
+    are explicit milliseconds, so they are read as-is and never rescaled;
+    reading only the raw Plaud keys collapsed every such segment to ``0..0``
+    and made re-identification silently skip the meeting.
+
     Segments without a speaker label become ``UU`` turns (skipped by the
     identifier); segments with unusable timings are dropped. Returns ``None``
     when nothing usable remains. Word timings are not required — the
     ASR-first identifier only needs segment turns.
     """
     parsed: list[tuple[float, float, str, str]] = []
+    explicit_ms = False
     for seg in segments or []:
         if not isinstance(seg, dict):
             continue
+        is_ms_shape = "startMs" in seg or "endMs" in seg
         try:
-            start = float(seg.get("start_time") or 0)
-            end = float(seg.get("end_time") or 0)
+            start = float((seg.get("startMs") if is_ms_shape else seg.get("start_time")) or 0)
+            end = float((seg.get("endMs") if is_ms_shape else seg.get("end_time")) or 0)
         except (TypeError, ValueError):
             continue
         if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
             continue
         speaker = str(seg.get("speaker") or "").strip() or UNKNOWN_PLAUD_SPEAKER
-        parsed.append((start, end, speaker, str(seg.get("content") or "")))
+        content = seg.get("text") if is_ms_shape else seg.get("content")
+        parsed.append((start, end, speaker, str(content or "")))
+        explicit_ms = explicit_ms or is_ms_shape
     if not parsed:
         return None
 
@@ -238,7 +251,13 @@ def plaud_segments_to_transcript(
     except (TypeError, ValueError):
         total_ms = 0.0
     max_end = max(end for _, end, _, _ in parsed)
-    if total_ms > 0 and max_end > 0 and max_end < total_ms * 0.1 and max_end * 1000.0 <= total_ms * 1.05:
+    if (
+        not explicit_ms
+        and total_ms > 0
+        and max_end > 0
+        and max_end < total_ms * 0.1
+        and max_end * 1000.0 <= total_ms * 1.05
+    ):
         scale = 1000.0
 
     return Transcript(
@@ -294,6 +313,18 @@ def _is_plaud_deleted(conn: Any, file_id: str, canonical_id: str) -> bool:
         return row is not None
     except Exception:
         return False
+
+
+def _int_option(value: Any, env_name: str, default: int) -> int:
+    """Resolve an int setting from an explicit option, then the environment, then a default."""
+    for raw in (value, os.environ.get(env_name)):
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return default
 
 
 class PlaudPoller:
@@ -353,6 +384,10 @@ class PlaudPoller:
         self.page_size: int = int(opts.get("pageSize") or DEFAULT_PAGE_SIZE)
         self.pcs_wait_ms: int = int(opts.get("pcsWaitMs") or DEFAULT_PCS_WAIT_MS)
         self.retry_options: dict[str, Any] = dict(opts.get("retryOptions") or {})
+        self.backfill_batch: int = _int_option(opts.get("plaudBackfillBatch"), "OLIVE_PLAUD_BACKFILL_BATCH", 25)
+        self.backfill_cooldown_ms: int = _int_option(
+            opts.get("plaudBackfillCooldownMs"), "OLIVE_PLAUD_BACKFILL_COOLDOWN_MS", 21_600_000
+        )
 
         self._scheduler: AsyncIOScheduler | None = None
         self._in_flight: asyncio.Task[dict[str, Any]] | None = None
@@ -404,9 +439,13 @@ class PlaudPoller:
             self._scheduler = None
         try:
             asyncio.get_running_loop().create_task(self.trigger())
-            # Boot backfill: already-ingested Plaud meetings predate speaker
-            # identification — queue them so new enrollments also apply.
-            self._spawn_background(self.backfill_plaud_speaker_identification())
+            # Boot backfill (OFF by default): already-ingested Plaud meetings predate
+            # speaker identification. A full-corpus sweep on every boot is an
+            # uncontrolled bulk re-ID (ambient recordings included), so it only runs
+            # when OLIVE_PLAUD_IDENTIFY_ON_BOOT is set. The scheduled poll and the
+            # explicit POST /api/meetings/{id}/speakers/reidentify are unaffected.
+            if os.getenv("OLIVE_PLAUD_IDENTIFY_ON_BOOT", "").strip().lower() in ("1", "true", "yes", "on"):
+                self._spawn_background(self.backfill_plaud_speaker_identification())
         except RuntimeError:
             pass
 
@@ -509,6 +548,7 @@ class PlaudPoller:
         discovery_error: str | None = None
         discovered = 0
         resolved = 0
+        backfilled = 0
         error: str | None = None
 
         try:
@@ -523,6 +563,17 @@ class PlaudPoller:
             resolution_res = await self._fetch_pending_assets()
             resolved = resolution_res["resolved"]
             error = resolution_res["error"]
+            if self.backfill_batch > 0:
+                try:
+                    bf = await self.backfill_plaud_transcripts(
+                        limit=self.backfill_batch, cooldown_ms=self.backfill_cooldown_ms
+                    )
+                    backfilled = int(bf.get("upgraded", 0))
+                except Exception as bf_err:
+                    self.logger.warn(
+                        "Plaud transcript backfill pass failed",
+                        {"category": "plaud", "error": str(bf_err)},
+                    )
             self.logger.debug(
                 "Plaud polling cycle finished",
                 {
@@ -548,6 +599,7 @@ class PlaudPoller:
             "discoveryError": discovery_error,
             "discovered": discovered,
             "resolved": resolved,
+            "backfilled": backfilled,
             "pcsPending": pcs_pending,
             "startedAt": started_at,
             "completedAt": completed_at,
@@ -936,6 +988,7 @@ class PlaudPoller:
                 {"id": meeting["id"]},
             )
 
+        safe_reindex(self.db, meeting["id"], self.meetings_dir)
         always, when_unnamed = self._resolve_plaud_retranscribe_flags()
         has_only_generic = not segments or all(is_generic_plaud_speaker(s.get("speaker")) for s in segments)
         # No transcript segments (e.g. Plaud minutes exhausted mid-flow,
@@ -978,8 +1031,11 @@ class PlaudPoller:
                 {"now": resolved_at, "id": meeting["id"]},
             )
             conn.execute(
-                text("UPDATE plaud_ingest_state SET pcs_resolved = 1 WHERE meeting_id = :id"),
-                {"id": meeting["id"]},
+                text(
+                    "UPDATE plaud_ingest_state SET pcs_resolved = 1, backfill_checked_at = :now "
+                    "WHERE meeting_id = :id"
+                ),
+                {"id": meeting["id"], "now": resolved_at},
             )
 
         self._hand_off_transcription(meeting["id"], "audio-only Plaud meeting")
@@ -1559,7 +1615,12 @@ class PlaudPoller:
         duration_ms = recording.get("duration_ms") or (int(meeting["end_time"]) - int(meeting["start_time"]))
         transcript = plaud_segments_to_transcript(raw_segments, duration_ms)
         if transcript is None:
-            return skipped
+            reason = "plaud.json has no segments with usable timings"
+            self.logger.warn(
+                "Plaud speaker identification skipped; keeping Plaud labels",
+                {"category": "plaud", "meetingId": meeting_id, "reason": reason},
+            )
+            return {**skipped, "error": reason}
 
         enrolled = await self._get_enrolled_speakers_with_voiceprints()
         if not enrolled:
@@ -1767,6 +1828,117 @@ class PlaudPoller:
             )
             summary["error"] = str(exc)
             return summary
+
+    async def backfill_plaud_transcripts(
+        self, limit: int = 200, cooldown_ms: int | None = None
+    ) -> dict[str, Any]:
+        """Pull Plaud transcripts for meetings that were ingested audio-only.
+
+        Once the PCS wait deadline passes, a recording with no transcript is
+        resolved audio-only and the poller never looks at it again. If the user
+        transcribes it in the Plaud app later, this re-checks Plaud and ingests
+        the transcript. Each row is stamped ``backfill_checked_at`` so a
+        never-transcribed recording is not re-fetched until ``cooldown_ms``
+        has passed (``None`` disables the cooldown filter).
+        """
+        summary: dict[str, Any] = {"checked": 0, "upgraded": 0, "stillPending": 0, "missing": 0, "errors": 0}
+        get_file_fn = getattr(self.client, "get_file", None) or getattr(self.client, "getFile", None)
+        if not callable(get_file_fn):
+            return summary
+
+        query = (
+            "SELECT p.meeting_id AS meeting_id FROM meetings m "
+            "JOIN plaud_ingest_state p ON p.meeting_id = m.id "
+            "WHERE m.source = 'plaud' AND m.status = 'ready' AND m.primary_transcript_artifact_id IS NULL "
+            "AND p.pcs_resolved = 1 AND p.duplicate_of_meeting_id IS NULL "
+        )
+        params: dict[str, Any] = {"lim": max(1, int(limit))}
+        if cooldown_ms is not None:
+            query += "AND (p.backfill_checked_at IS NULL OR p.backfill_checked_at <= :cutoff) "
+            params["cutoff"] = self.now() - int(cooldown_ms)
+        query += "ORDER BY m.start_time DESC LIMIT :lim"
+
+        with self.db.connect() as conn:
+            meeting_ids = [str(r["meeting_id"]) for r in conn.execute(text(query), params).mappings().all()]
+
+        for meeting_id in meeting_ids:
+            try:
+                with self.db.connect() as conn:
+                    meeting = (
+                        conn.execute(text("SELECT * FROM meetings WHERE id = :id"), {"id": meeting_id})
+                        .mappings()
+                        .first()
+                    )
+                    state = (
+                        conn.execute(
+                            text("SELECT * FROM plaud_ingest_state WHERE meeting_id = :id"),
+                            {"id": meeting_id},
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    if not meeting or not state:
+                        continue
+                    file_id = str(state["plaud_file_id"])
+                    if _is_plaud_deleted(conn, file_id, canonical_plaud_file_id(file_id)):
+                        continue
+                summary["checked"] += 1
+                with self.db.begin() as conn:
+                    conn.execute(
+                        text("UPDATE plaud_ingest_state SET backfill_checked_at = :now WHERE meeting_id = :id"),
+                        {"now": self.now(), "id": meeting_id},
+                    )
+                try:
+                    detail, effective_file_id = await self._fetch_plaud_detail(get_file_fn, file_id)
+                except NotFoundError as missing:
+                    await self._mark_file_missing(meeting, state, missing)
+                    summary["missing"] += 1
+                    continue
+                # Only a real transcript counts: a summary-only payload would be
+                # re-ingested (and re-handed to local transcription) every cooldown.
+                if _content_is_ready(detail) and parse_transcript_segments(detail.get("source_list")):
+                    await self._ingest_ready_meeting(
+                        meeting, {**state, "plaud_file_id": effective_file_id}, detail
+                    )
+                    summary["upgraded"] += 1
+                else:
+                    summary["stillPending"] += 1
+            except Exception as exc:
+                summary["errors"] += 1
+                self.logger.warn(
+                    "Plaud transcript backfill skipped a meeting",
+                    {"category": "plaud", "meetingId": meeting_id, "error": str(exc)},
+                )
+        if summary["upgraded"]:
+            self.logger.info("Plaud transcript backfill upgraded meetings", {"category": "plaud", **summary})
+        return summary
+
+    async def enqueue_transcript_backfill(self, limit: int = 500) -> dict[str, Any]:
+        """Queue an on-demand transcript backfill on the plaud_sync queue.
+
+        Uses a short 60s cooldown rather than 0 so a burst of calls (or a
+        collision with the auto-drain pass in ``_run_poll``) cannot re-fetch a
+        row that was just checked, which would hammer the Plaud API and risk a
+        double ingest. Rows untouched in the last minute still drain in full,
+        so this remains a complete on-demand sweep.
+        """
+        from ..workflows import (
+            QUEUE_PLAUD_SYNC,
+            enqueue_stage_job,
+            ensure_dbos_launched_async,
+        )
+
+        await ensure_dbos_launched_async(
+            config_dir=self.config_dir or None,
+            meetings_dir=self.meetings_dir or None,
+        )
+        await enqueue_stage_job(
+            QUEUE_PLAUD_SYNC,
+            lambda: self.backfill_plaud_transcripts(limit, cooldown_ms=60_000),
+            deduplication_id="plaud-backfill-transcripts",
+            label="plaud-backfill-transcripts",
+        )
+        return {"status": "queued"}
 
     async def _pending_count(self) -> int:
         with self.db.connect() as conn:

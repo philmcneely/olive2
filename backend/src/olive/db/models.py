@@ -107,6 +107,7 @@ class PlaudIngestStateModel(Base):
     duplicate_of_meeting_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("meetings.id"), nullable=True
     )
+    backfill_checked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PlaudDeletedFileModel(Base):

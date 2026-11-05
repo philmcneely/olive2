@@ -23,6 +23,7 @@ from ..settings import resolve_paths
 from ..speaker_labels import is_generic_speaker_label
 from ..workflows import QUEUE_SUMMARIZE, enqueue_stage_job, ensure_dbos_launched_async
 from .llm import LlmService
+from .search import safe_reindex
 from .templates import TemplateService
 
 SUMMARY_STATUS_TTL_S = 60.0
@@ -392,6 +393,7 @@ class SummaryService:
                     {"aid": artifact_id, "fin": fin_now, "mid": meeting["id"]},
                 )
 
+        safe_reindex(self.db, meeting["id"], self.meetings_dir)
         logger.info(
             "Generated summary for meeting",
             {
@@ -499,6 +501,7 @@ class SummaryService:
                 )
             conn.execute(text("DELETE FROM artifacts WHERE id = :aid"), {"aid": artifact_id})
 
+        safe_reindex(self.db, meeting_id, self.meetings_dir)
         logger.info("Deleted summary artifact", {"meetingId": meeting_id, "artifactId": artifact_id})
 
     deleteSummary = delete_summary
@@ -538,6 +541,7 @@ class SummaryService:
                 {"aid": artifact_id, "now": now, "mid": meeting_id},
             )
 
+        safe_reindex(self.db, meeting_id, self.meetings_dir)
         logger.info("Updated primary summary artifact", {"meetingId": meeting_id, "artifactId": artifact_id})
 
     setPrimarySummary = set_primary_summary
