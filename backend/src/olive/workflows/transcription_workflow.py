@@ -37,6 +37,7 @@ from ..ml.scoring import (
     normalize_vector,
     score_against_trusted_vectors,
 )
+from ..ml.transcript_quality import assess_transcript_quality
 from ..schemas import (
     EnrolledSpeaker,
     Transcript,
@@ -1205,6 +1206,31 @@ async def step_transcribe_asr(
                 "mode": "segments",
                 "segments": raw_segments_out,
             }
+
+        # Degeneracy / hallucination guard (advisory, non-destructive): local ASR
+        # can loop a phrase on silence or hard audio and the result flows downstream
+        # as if it were real speech. Score the assembled text and stamp a `quality`
+        # block onto the ASR doc; a suspect transcript is logged for review but is
+        # NEVER discarded or blocked here.
+        if asr_doc.get("mode") == "whole_file":
+            _asr_text = str(asr_doc.get("fullText") or "")
+        else:
+            _asr_text = " ".join(
+                str(seg.get("text") or "") for seg in asr_doc.get("segments") or []
+            )
+        _quality = await asyncio.to_thread(assess_transcript_quality, _asr_text)
+        asr_doc["quality"] = _quality.to_dict()
+        if _quality.suspect:
+            logger.warn(
+                "ASR transcript flagged as possible hallucination/repetition loop",
+                {
+                    "category": "transcription",
+                    "meetingId": meeting_id,
+                    "wordCount": _quality.word_count,
+                    "reasons": _quality.reasons,
+                    "metrics": _quality.metrics,
+                },
+            )
 
         await asyncio.to_thread(raw_asr_path.write_text, json.dumps(asr_doc), "utf-8")
         _update_stage_run(task_id, STAGE_ASR, "done")

@@ -8,6 +8,12 @@ day its changes merged (`## [YYYY-MM-DD]`), with entries grouped under
 `Added` / `Changed` / `Fixed` — pushing a tag publishes the image and turns
 every section newer than the previous tag into the GitHub release notes.
 
+## [2026-11-05]
+
+### Added
+
+- **Hallucination / repetition-loop guard on transcripts** — local transcription now scores each finished transcript for runaway repetition (a phrase looped over and over, a single word echoed, near-zero vocabulary), the degenerate output speech-to-text sometimes produces on silence or difficult audio. Suspect transcripts are flagged for review and recorded with the signals that tripped the guard; nothing is deleted or blocked, and normal meetings are unaffected.
+
 ## [2026-10-23]
 
 ### Added
