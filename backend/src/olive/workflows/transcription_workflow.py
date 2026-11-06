@@ -37,6 +37,7 @@ from ..ml.scoring import (
     normalize_vector,
     score_against_trusted_vectors,
 )
+from ..ml.transcript_quality import assess_transcript_quality
 from ..schemas import (
     EnrolledSpeaker,
     Transcript,
@@ -1088,10 +1089,35 @@ async def step_transcribe_asr(
                     "message": "Transcribing audio with Cohere Transcribe...",
                 },
             )
+            # The engine transcribes the whole file in one long worker-thread call; without
+            # a liveness signal the stall watchdog sees a single "50%" and then silence,
+            # and cancels any file whose ASR outlasts the stall window. The engine reports
+            # each finished chunk (from its thread), which we forward as progress, so only
+            # a genuinely wedged chunk still trips the watchdog.
+            loop = asyncio.get_running_loop()
+
+            def _on_asr_chunk(done: int, total: int) -> None:
+                pct = 50 + int(30 * done / max(1, total))
+                coro = _emit_progress(
+                    task_id,
+                    {
+                        "stage": "transcribing",
+                        "percent": pct,
+                        "current": 1,
+                        "total": total_segments,
+                        "totalMs": duration_ms,
+                        "message": f"Transcribing audio with Cohere Transcribe ({done}/{total} chunks)...",
+                    },
+                )
+                try:
+                    asyncio.run_coroutine_threadsafe(coro, loop)
+                except RuntimeError:  # loop closed (shutdown): progress is best-effort
+                    coro.close()
+
             full_asr = await pipe._call_asr_segment(
                 samples,
                 target_sr,
-                {"language": language, "startMs": 0, "modelId": model_id},
+                {"language": language, "startMs": 0, "modelId": model_id, "onChunk": _on_asr_chunk},
             )
             if pipe.unload_per_stage and hasattr(pipe.asr_engine, "release"):
                 pipe.asr_engine.release()
@@ -1180,6 +1206,31 @@ async def step_transcribe_asr(
                 "mode": "segments",
                 "segments": raw_segments_out,
             }
+
+        # Degeneracy / hallucination guard (advisory, non-destructive): local ASR
+        # can loop a phrase on silence or hard audio and the result flows downstream
+        # as if it were real speech. Score the assembled text and stamp a `quality`
+        # block onto the ASR doc; a suspect transcript is logged for review but is
+        # NEVER discarded or blocked here.
+        if asr_doc.get("mode") == "whole_file":
+            _asr_text = str(asr_doc.get("fullText") or "")
+        else:
+            _asr_text = " ".join(
+                str(seg.get("text") or "") for seg in asr_doc.get("segments") or []
+            )
+        _quality = await asyncio.to_thread(assess_transcript_quality, _asr_text)
+        asr_doc["quality"] = _quality.to_dict()
+        if _quality.suspect:
+            logger.warn(
+                "ASR transcript flagged as possible hallucination/repetition loop",
+                {
+                    "category": "transcription",
+                    "meetingId": meeting_id,
+                    "wordCount": _quality.word_count,
+                    "reasons": _quality.reasons,
+                    "metrics": _quality.metrics,
+                },
+            )
 
         await asyncio.to_thread(raw_asr_path.write_text, json.dumps(asr_doc), "utf-8")
         _update_stage_run(task_id, STAGE_ASR, "done")
